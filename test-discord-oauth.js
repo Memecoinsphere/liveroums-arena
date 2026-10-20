@@ -32,7 +32,7 @@ const fakeServer = () => http.createServer((req, res) => {
 
 function startApp(env) {
   return new Promise((resolve, reject) => {
-    const p = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, PORT: APP_PORT, DB_FILE: path.join(tmp, 'arena.db'), MAIL_OUTBOX: path.join(tmp, 'arena.db.outbox.jsonl'), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(process.execPath, ['server.js'], { cwd: __dirname, env: { ...process.env, PORT: APP_PORT, DB_FILE: path.join(tmp, 'arena.db'), ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
     p.stdout.on('data', d => { if (String(d).includes('LiveRoums Arena sur')) resolve(p); });
     p.stderr.on('data', d => process.stderr.write(d)); p.on('exit', c => reject(new Error('server exit ' + c)));
   });
@@ -88,16 +88,9 @@ test('state invalide ou absent refusé (CSRF)', async () => {
   assert.match(await c2.page('/connexion'), /état OAuth invalide/);
 });
 
-// Vérification d'email obligatoire : lien lu dans la boîte d'envoi de test du serveur
-async function verifyEmail(c, email) {
-  const mails = fs.readFileSync(path.join(tmp, 'arena.db.outbox.jsonl'), 'utf8').trim().split('\n').map(JSON.parse).filter(m => m.to === email);
-  const link = mails.at(-1).text.match(/\/verifier-email\?token=[\w-]+/)[0];
-  const r = await c.go(link); assert.strictEqual(r.headers.get('location'), '/profil');
-}
 test('liaison : un compte connecté lie son Discord (id, nom, avatar)', async () => {
   const c = client();
   await c.form('/inscription', { pseudo: 'lieur', email: 'lieur@t.gg', password: 'MotDePasse1', platform: 'PC' });
-  await verifyEmail(c, 'lieur@t.gg');
   const { cb } = await c.discord('codeLink');
   assert.strictEqual(cb.headers.get('location'), '/profil');
   assert.strictEqual(lastTokenReq.redirect_uri, 'https://arena.example.com/auth/discord/callback');
@@ -116,7 +109,7 @@ test('liaison : un compte connecté lie son Discord (id, nom, avatar)', async ()
 });
 
 test('liaison refusée si le Discord appartient déjà à un autre joueur', async () => {
-  const c = client(); await c.form('/inscription', { pseudo: 'autre', email: 'autre@t.gg', password: 'MotDePasse1', platform: 'PC' }); await verifyEmail(c, 'autre@t.gg');
+  const c = client(); await c.form('/inscription', { pseudo: 'autre', email: 'autre@t.gg', password: 'MotDePasse1', platform: 'PC' });
   await c.discord('codeLink');
   const html = await c.page('/profil'); assert.match(html, /déjà lié à un autre joueur/); assert.match(html, /Lier mon compte Discord/);
 });

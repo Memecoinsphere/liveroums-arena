@@ -62,11 +62,5 @@ for (const col of ['discord_global_name', 'discord_avatar'])
   if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, processed_at TEXT);`);
-// ---- Vérification d'email : les comptes existants (et l'admin) sont considérés comme vérifiés lors de la migration ----
-if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'email_verified')) {
-  db.exec('ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0; ALTER TABLE users ADD COLUMN verified_at TEXT;');
-  db.exec('UPDATE users SET email_verified=1, verified_at=CURRENT_TIMESTAMP');
-}
-db.prepare('UPDATE users SET email_verified=1, verified_at=COALESCE(verified_at,CURRENT_TIMESTAMP) WHERE is_admin=1 AND email_verified=0').run();
 db.emit = (type, payload = {}) => db.prepare('INSERT INTO events(type,payload) VALUES(?,?)').run(type, JSON.stringify(payload));
 module.exports = db;

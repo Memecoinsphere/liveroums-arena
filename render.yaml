@@ -16,9 +16,3 @@ services:
         sync: false
       - key: ANTICHEAT_EXPORT_TOKEN   # optionnel : active GET /api/admin/anticheat-export (Bearer) ; vide = désactivée
         sync: false
-      - key: RESEND_API_KEY   # emails de vérification via Resend (prioritaire)
-        sync: false
-      - key: SMTP_URL         # ou SMTP (smtps://user:pass@host:465)
-        sync: false
-      - key: MAIL_FROM        # ex. LiveRoums Arena <no-reply@ton-domaine>
-        sync: false

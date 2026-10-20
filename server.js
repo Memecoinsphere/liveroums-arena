@@ -29,8 +29,7 @@ app.use(SEC.csrf);
 app.use('/api/', SEC.limits.api);
 app.use((req, res, next) => {
   B.autoGenerate();
-  req.user = req.session.uid ? db.prepare('SELECT id,pseudo,email,platform,game_id,is_admin,email_verified FROM users WHERE id=?').get(req.session.uid) : null;
-  if (req.user && !req.user.email_verified) { delete req.session.uid; req.user = null; } // email non vérifié : aucune session active
+  req.user = req.session.uid ? db.prepare('SELECT id,pseudo,email,platform,game_id,is_admin FROM users WHERE id=?').get(req.session.uid) : null;
   if (req.user) { const d = P.dailyLogin(req.user.id); if (d) req.session.flash = req.session.flash || { type: 'ok', msg: `🎁 Bonus de connexion : +${d.total} LP (série de ${d.streak} jour${d.streak > 1 ? 's' : ''}) !` }; req.user.points = P.balance(req.user.id); req.user.spin = ROUE.canSpin(req.user.id); }
   res.page = (title, body) => { const f = req.session.flash; delete req.session.flash; res.send(layout(title, req.user, f, body)); };
   req.flash = (type, msg) => { req.session.flash = { type, msg }; };
@@ -49,7 +48,6 @@ require('./routes-points')(app, { auth, admin });
 const ROUE = require('./roue')(app, { auth, admin });
 require('./export')(app, { auth, admin });
 require('./anticheat')(app, { auth, admin });
-const VERIFY = require('./verify'); VERIFY(app, { auth, admin, layout });
 const M = require('./mm');
 const getT = id => db.prepare(TQ + ' WHERE t.id=?').get(id);
 
@@ -148,16 +146,14 @@ app.post('/inscription', SEC.limits.signup, async (req, res, nextErr) => { try {
   if (!PLATFORMS.includes(platform)) return err('Plateforme invalide.');
   if (db.prepare('SELECT 1 FROM users WHERE pseudo=? OR email=?').get(pseudo, email.toLowerCase())) return err('Pseudo ou email déjà utilisé.');
   const hash = await bcrypt.hash(password, 12);
-  const id = db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id,email_verified) VALUES(?,?,?,?,?,0)').run(pseudo, email.toLowerCase(), hash, platform, game_id.trim()).lastInsertRowid;
-  // Compte inactif tant que l'email n'est pas vérifié : pas de session ouverte
-  await VERIFY.sendVerification(req, { id, pseudo, email: email.toLowerCase() });
-  req.flash('ok', `Compte créé ! Un lien de vérification a été envoyé à ${email.toLowerCase()} (valable 24 h). Clique dessus pour activer ton compte.`); res.redirect(303, '/connexion?verif=1');
+  const id = db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id) VALUES(?,?,?,?,?)').run(pseudo, email.toLowerCase(), hash, platform, game_id.trim()).lastInsertRowid;
+  req.session.regenerate(e => { if (e) return nextErr(e); req.session.uid = id; req.session.flash = { type: 'ok', msg: `Bienvenue ${pseudo} !` }; res.redirect(303, '/profil'); });
 } catch (e) { nextErr(e); } });
 app.get('/connexion', (req, res) => res.page('Connexion', `<section class="form-wrap"><h1>Connexion</h1><form method="post" class="form">
   <input type="hidden" name="next" value="${esc(SEC.safeNext(req.query.next))}"><label>Email ou pseudo<input name="login" required maxlength="254" autocomplete="username"></label>
   <label>Mot de passe<input type="password" name="password" required></label><button class="btn lg">Se connecter</button>
   <a class="btn discord lg" href="/auth/discord">💬 Se connecter avec Discord</a>
-  <p class="muted">Pas de compte ? <a href="/inscription">Inscription</a></p></form>${req.query.verif ? VERIFY.resendForm() : '<p class="muted sm"><a href="/connexion?verif=1">Email de vérification non reçu ?</a></p>'}</section>`));
+  <p class="muted">Pas de compte ? <a href="/inscription">Inscription</a></p></form></section>`));
 const DUMMY = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 12); // temps constant si le compte n'existe pas
 app.post('/connexion', SEC.limits.login, async (req, res, nextErr) => { try {
   const login = String(req.body.login || '').slice(0, 254), password = String(req.body.password || '').slice(0, 200); const next = SEC.safeNext(req.body.next);
@@ -167,7 +163,6 @@ app.post('/connexion', SEC.limits.login, async (req, res, nextErr) => { try {
   const okPw = await bcrypt.compare(password, u ? u.password_hash : DUMMY);
   if (!u || !okPw) { SEC.loginFailed(login); req.flash('err', 'Identifiants incorrects.'); return res.redirect(303, '/connexion'); }
   SEC.loginOk(login);
-  if (!u.email_verified) { req.flash('err', 'Ton email n\'est pas encore vérifié. Clique sur le lien reçu par mail pour activer ton compte, ou demande un nouveau lien ci-dessous.'); return res.redirect(303, '/connexion?verif=1'); }
   req.session.regenerate(e => { if (e) return nextErr(e); req.session.uid = u.id; res.redirect(303, next); });
 } catch (e) { nextErr(e); } 
 });
@@ -181,7 +176,7 @@ app.get('/profil', auth, (req, res) => {
   res.page('Mon profil', `<section>${P.bannerHtml(req.user.id)}<div class="profile">${P.avatarHtml(req.user.id, req.user.pseudo, db.prepare('SELECT discord_avatar FROM users WHERE id=?').get(req.user.id).discord_avatar)}<div>${P.h1Html(req.user.id, req.user.pseudo, req.user.is_admin ? '<span class="badge ex">Admin</span>' : '')}
   <p class="muted">${esc(req.user.email)} · ${esc(req.user.platform)} · ID de jeu : ${esc(req.user.game_id || '—')}</p></div></div>
   <p><a href="/joueurs/${encodeURIComponent(req.user.pseudo)}">Voir mon profil public →</a></p>
-  <h2>💎 Points LiveRoums</h2><div class="lp-stats"><div class="lp-wallet">💎 <b>${P.balance(req.user.id)}</b> LP</div>${P.levelHtml(req.user.id)}<div class="inline"><a class="btn sm" href="/boutique">🛒 Boutique</a><a class="btn ghost sm" href="/points">Historique & défis</a>${req.user.is_admin ? '<a class="btn ghost sm" href="/admin/points">Octroyer des LP</a><a class="btn ghost sm" href="/admin/lots">Lots à livrer</a><a class="btn ghost sm" href="/admin/export">📦 Export des données</a><a class="btn ghost sm" href="/admin/anti-triche">🛡️ Anti-triche</a><a class="btn ghost sm" href="/admin/verifications">📧 Comptes à vérifier</a>' : ''}</div></div>
+  <h2>💎 Points LiveRoums</h2><div class="lp-stats"><div class="lp-wallet">💎 <b>${P.balance(req.user.id)}</b> LP</div>${P.levelHtml(req.user.id)}<div class="inline"><a class="btn sm" href="/boutique">🛒 Boutique</a><a class="btn ghost sm" href="/points">Historique & défis</a>${req.user.is_admin ? '<a class="btn ghost sm" href="/admin/points">Octroyer des LP</a><a class="btn ghost sm" href="/admin/lots">Lots à livrer</a><a class="btn ghost sm" href="/admin/export">📦 Export des données</a><a class="btn ghost sm" href="/admin/anti-triche">🛡️ Anti-triche</a>' : ''}</div></div>
   <h2>Skill rating</h2><div class="sr-grid">${MMR.srTable(req.user.id)}</div>
   <h2>🔗 Comptes liés</h2>${MMR.linkedList(req.user.id)}
   <div class="link-forms panel"><div class="inline">${(() => { const u = db.prepare('SELECT discord_username, discord_global_name, discord_avatar FROM users WHERE id=?').get(req.user.id); const d = u.discord_username;
