@@ -93,13 +93,13 @@ module.exports = (app, { auth, admin }) => {
   const queueState = uid => {
     R.tryAll();
     const rcounts = db.prepare('SELECT game,COUNT(*) n FROM ranked_queue GROUP BY game').all();
-    const rq = uid ? R.inQueue(uid) : null, duo = uid ? R.myDuo(uid) : null, inv = uid ? R.invites(uid) : [];
-    const rv = [rcounts, rq && rq.game, duo && [duo.id, duo.mate_id, duo.invited_id], inv.map(i => i.id)];
+    const rq = uid ? R.inQueue(uid) : null, quat = uid ? R.myQuatuor(uid) : null;
+    const rv = [rcounts, rq && rq.game, quat && [quat.id, quat.members.map(m => m.user_id)]];
     const counts = db.prepare('SELECT game,mode,COUNT(*) n FROM queue GROUP BY game,mode').all();
     const mine = uid ? db.prepare('SELECT * FROM queue WHERE user_id=?').get(uid) : null;
     const lobby = uid ? M.activeLobby(uid) : null;
     const live = db.prepare("SELECT COUNT(*) c FROM lobbies WHERE status='en_cours'").get().c;
-    return { counts, mine, lobby, live, rcounts, rq, duo, inv, v: JSON.stringify([counts, mine && mine.game + mine.mode, lobby?.code, live, rv]) };
+    return { counts, mine, lobby, live, rcounts, rq, quat, v: JSON.stringify([counts, mine && mine.game + mine.mode, lobby?.code, live, rv]) };
   };
   app.get('/api/matchmaking', (req, res) => { const s = queueState(req.user?.id); res.json({ v: s.v, partie: s.lobby && s.lobby.status === 'en_cours' ? `/parties/${s.lobby.code}` : null }); });
   app.get('/matchmaking', (req, res) => {
@@ -112,38 +112,39 @@ module.exports = (app, { auth, admin }) => {
       ${req.user ? (me ? `<form method="post" action="/matchmaking/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche en cours…</span>`
         : `<form method="post" action="/matchmaking/rejoindre"><input type="hidden" name="gm" value="${esc(g)}|${m}"><button class="btn sm" ${s.lobby ? 'disabled' : ''}>Rejoindre la file</button></form>`) : ''}</div>`;
     })).join('');
-    const u = req.user, d = s.duo;
-    const pseudoOf = id => id ? db.prepare('SELECT pseudo FROM users WHERE id=?').get(id)?.pseudo : null;
+    const u = req.user, d = s.quat;
     const rcards = Object.keys(R.FORMAT).map(g => {
       const n = s.rcounts.find(c => c.game === g)?.n || 0, need = 2 * R.FORMAT[g], me = s.rq && s.rq.game === g;
-      const myDuoHere = d && d.game === g, ready = myDuoHere && d.mate_id;
+      const here = d && d.game === g, ready = here && d.members.length === R.FORMAT[g];
       let act = '';
       if (u) {
-        if (me) act = `<form method="post" action="/classe/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche ${s.rq.duo_id ? 'en duo' : 'solo'}… (écart ±${R.spread(Date.now() - new Date(s.rq.joined_at.replace(' ', 'T') + 'Z'))} SR)</span>`;
+        if (me) act = `<form method="post" action="/classe/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche ${s.rq.group_id ? 'en quatuor' : 'solo'}… (écart ±${R.spread(Date.now() - new Date(s.rq.joined_at.replace(' ', 'T') + 'Z'))} SR)</span>`;
         else if (s.lobby || s.rq) act = '';
-        else if (d && !myDuoHere) act = `<p class="muted sm">Ton duo est prévu pour ${esc(d.game)}.</p>`;
-        else if (ready) act = d.leader_id === u.id ? `<form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👥 Rechercher en duo</button></form>` : '<p class="muted sm">Le créateur du duo lance la recherche.</p>';
-        else if (myDuoHere) act = '<p class="muted sm">⏳ En attente de ton coéquipier…</p>';
+        else if (d && !here) act = `<p class="muted sm">Ton quatuor est prévu pour ${esc(d.game)}.</p>`;
+        else if (ready) act = d.leader_id === u.id ? `<form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👥 Rechercher en quatuor</button></form>` : '<p class="muted sm">Le chef du quatuor lance la recherche.</p>';
+        else if (here) act = `<p class="muted sm">⏳ Quatuor incomplet (${d.members.length}/${R.FORMAT[g]}) : partage le code pour compléter l'équipe.</p>`;
         else act = `<div class="rk-acts"><form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👤 Solo</button></form>
-          ${R.duoAllowed(g) ? `<form method="post" action="/classe/duo"><input type="hidden" name="game" value="${esc(g)}"><button class="btn ghost sm">👥 Créer un duo</button></form>` : ''}</div>`;
+          <form method="post" action="/classe/quatuor"><input type="hidden" name="game" value="${esc(g)}"><button class="btn ghost sm">👥 Créer un quatuor</button></form></div>`;
       }
       return `<div class="queue-card ranked-card ${me ? 'me' : ''}" style="--gc:${(GAMES[g] || GAMES[GAME]).color}"><div class="qc-head"><span class="gicon">${(GAMES[g] || GAMES[GAME]).icon}</span><div><b>${esc(g)}</b><span class="mode">${R.fmt(g)}</span></div><span class="badge classe">Classé</span></div>
       <div class="bar"><i style="width:${Math.min(100, n / need * 100)}%"></i></div><p class="muted sm">${n} / ${need} joueurs en file${u ? ` · ton SR : ${rank(M.getSR(u.id, g))}` : ''}</p>
-      <p class="sm ${R.duoAllowed(g) ? 'muted' : 'warn-txt'}">${R.duoAllowed(g) ? 'Solo ou duo (2 max)' : `🚫 Duo non autorisé (${R.fmt(g)}) : solo uniquement`}</p>${act}</div>`;
+      <p class="sm muted">Solo ou quatuor (${R.FORMAT[g]} max)</p>${act}</div>`;
     }).join('');
-    const duoPanel = !u ? '' : d ? `<h3>👥 Mon duo · ${esc(d.game)}</h3><p>Code duo : <b class="code">${d.code}</b></p>
-      <ul class="entrants"><li>👑 ${esc(pseudoOf(d.leader_id))}</li><li>${d.mate_id ? esc(pseudoOf(d.mate_id)) : `<span class="muted">${d.invited_id ? `Invitation envoyée à ${esc(pseudoOf(d.invited_id))}…` : 'Place libre'}</span>`}</li></ul>
-      ${d.leader_id === u.id && !d.mate_id ? `<form method="post" action="/classe/duo/inviter" class="stack"><input name="pseudo" placeholder="Pseudo de ton ami" maxlength="20" required><button class="btn ghost sm">Inviter</button></form>` : ''}
-      <form method="post" action="/classe/duo/quitter"><button class="btn ghost sm">${d.leader_id === u.id ? 'Dissoudre le duo' : 'Quitter le duo'}</button></form>`
-      : `<h3>👥 Duo classé</h3>${s.inv.map(i => `<div class="invite"><b>${esc(i.leader)}</b> t'invite en duo (${esc(i.game)}) <form method="post" action="/classe/duo/accepter" class="inline"><input type="hidden" name="id" value="${i.id}"><button class="btn sm rk">Accepter</button></form></div>`).join('')}
-      <form method="post" action="/classe/duo/rejoindre" class="stack"><input name="code" placeholder="Code duo (5 car.)" maxlength="5" class="code-input" required><button class="btn ghost sm">Rejoindre un duo</button></form>`;
+    const N4 = R.FORMAT[GAME];
+    const quatPanel = !u ? '' : d ? `<h3>👥 Mon quatuor · ${d.members.length}/${N4}</h3><p>Code quatuor : <b class="code">${esc(d.code)}</b></p>
+      <ul class="entrants">${d.members.map(m => `<li>${m.user_id === d.leader_id ? '👑 ' : ''}${P.nameHtml(m.user_id, m.pseudo, { title: false })} ${rank(M.getSR(m.user_id, d.game))}
+        ${d.leader_id === u.id && m.user_id !== u.id ? `<form method="post" action="/classe/quatuor/exclure" class="inline"><input type="hidden" name="user_id" value="${m.user_id}"><button class="btn ghost sm" title="Exclure">Exclure</button></form>` : ''}</li>`).join('')}
+        ${Array.from({ length: N4 - d.members.length }, () => '<li class="muted">Place libre</li>').join('')}</ul>
+      <form method="post" action="/classe/quatuor/quitter"><button class="btn ghost sm">${d.leader_id === u.id ? 'Dissoudre le quatuor' : 'Quitter le quatuor'}</button></form>`
+      : `<h3>👥 Quatuor classé</h3><p class="muted sm">Groupe pré-formé de ${N4} joueurs = une équipe complète. Rejoins un quatuor avec son code :</p>
+      <form method="post" action="/classe/quatuor/rejoindre" class="stack"><input name="code" placeholder="Code quatuor (5 car.)" maxlength="5" class="code-input" required><button class="btn ghost sm">Rejoindre un quatuor</button></form>`;
     res.page('Matchmaking', `<section><h1>⚔️ Matchmaking</h1><p class="muted">Rejoins une file : dès que assez de joueurs attendent, ou dès qu'une partie se termine, les équipes sont formées automatiquement et équilibrées par SR. Mise à jour en direct toutes les 3 s.</p>
     ${s.lobby ? `<div class="ok-box">🎮 Tu es dans la partie <a href="/parties/${s.lobby.code}"><b class="code">${s.lobby.code}</b></a> (${s.lobby.status === 'attente' ? 'en attente' : 'en cours'}).</div>` : ''}
-    <div class="mm-cols"><div><section class="ranked-sec"><h2>🏆 Classé <small class="muted">— solo ou duo, SR en jeu</small></h2>
-    <p class="muted sm">Équipes équilibrées par SR, duos toujours dans la même équipe. Écart de SR autorisé : ±${R.SPREAD0}, puis +${R.SPREAD_STEP} toutes les ${R.STEP_S} s d'attente.</p>
+    <div class="mm-cols"><div><section class="ranked-sec"><h2>🏆 Classé <small class="muted">— solo ou quatuor, SR en jeu</small></h2>
+    <p class="muted sm">Équipes équilibrées par SR (SR moyen pour un quatuor). Un quatuor forme une équipe entière, face à un autre quatuor ou à 4 joueurs solo. Écart de SR autorisé : ±${R.SPREAD0}, puis +${R.SPREAD_STEP} toutes les ${R.STEP_S} s d'attente.</p>
     <div class="queue-grid">${rcards}</div></section>
     <h2>⚡ Partie rapide <small class="muted">— sans impact sur le SR</small></h2><div class="queue-grid">${cards}</div></div>
-    <aside class="panel">${duoPanel}<h3>🔒 Partie privée</h3>${req.user ? `<form method="post" action="/parties" class="stack"><select name="gm">${modeOpts()}</select><button class="btn">Créer une partie privée</button></form>
+    <aside class="panel">${quatPanel}<h3>🔒 Partie privée</h3>${req.user ? `<form method="post" action="/parties" class="stack"><select name="gm">${modeOpts()}</select><button class="btn">Créer une partie privée</button></form>
     <h3>🔑 Rejoindre avec un code</h3><form method="post" action="/parties/rejoindre" class="stack"><input name="code" placeholder="EX : AB12CD" maxlength="6" class="code-input" required><button class="btn ghost">Rejoindre</button></form>`
       : '<p><a href="/connexion?next=/matchmaking">Connecte-toi</a> pour jouer.</p>'}
     <h3>📡 Live</h3><p class="muted">${s.live} partie(s) en cours</p></aside></div></section>${poll('/api/matchmaking', s.v, 'partie')}`);
@@ -160,11 +161,10 @@ module.exports = (app, { auth, admin }) => {
   const rk = fn => (req, res) => { try { const msg = fn(req); const l = M.activeLobby(req.user.id); if (l) { req.flash('ok', 'Partie classée trouvée !'); return res.redirect(303, `/parties/${l.code}`); } req.flash('ok', msg); } catch (e) { req.flash('err', e.message); } res.redirect(303, '/matchmaking'); };
   app.post('/classe/rejoindre', auth, rk(req => { R.joinRanked(req.user.id, req.body.game); return `Tu es dans la file classée ${req.body.game}.`; }));
   app.post('/classe/quitter', auth, rk(req => { R.leaveRanked(req.user.id); return 'Tu as quitté la file classée.'; }));
-  app.post('/classe/duo', auth, rk(req => `Duo créé (code ${R.createDuo(req.user.id, req.body.game)}). Invite ton ami !`));
-  app.post('/classe/duo/inviter', auth, rk(req => `Invitation envoyée à ${R.invite(req.user.id, req.body.pseudo)}.`));
-  app.post('/classe/duo/accepter', auth, rk(req => { R.joinDuo(req.user.id, { id: req.body.id }); return 'Duo rejoint !'; }));
-  app.post('/classe/duo/rejoindre', auth, rk(req => { R.joinDuo(req.user.id, { code: req.body.code }); return 'Duo rejoint !'; }));
-  app.post('/classe/duo/quitter', auth, rk(req => { R.leaveDuo(req.user.id); return 'Tu as quitté le duo.'; }));
+  app.post('/classe/quatuor', auth, rk(req => `Quatuor créé (code ${R.createQuatuor(req.user.id, req.body.game)}). Partage le code à tes 3 coéquipiers !`));
+  app.post('/classe/quatuor/rejoindre', auth, rk(req => { R.joinQuatuor(req.user.id, req.body.code); return 'Quatuor rejoint !'; }));
+  app.post('/classe/quatuor/exclure', auth, rk(req => `${R.kick(req.user.id, parseInt(req.body.user_id, 10))} a été exclu du quatuor.`));
+  app.post('/classe/quatuor/quitter', auth, rk(req => R.leaveQuatuor(req.user.id) === 'dissous' ? 'Quatuor dissous.' : 'Tu as quitté le quatuor.'));
   app.post('/matchmaking/quitter', auth, (req, res) => { db.prepare('DELETE FROM queue WHERE user_id=?').run(req.user.id); req.flash('ok', 'Tu as quitté la file.'); res.redirect(303, '/matchmaking'); });
   app.post('/parties', auth, (req, res) => {
     const [g, m] = String(req.body.gm || '').split('|');

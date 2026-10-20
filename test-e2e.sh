@@ -114,7 +114,7 @@ q h$R -o /dev/null --data-urlencode "message=<script>alert(1)</script><img src=x
 ok "Chat : XSS échappé dans la page" 'P1=$(q h$R $B/parties/$CC); echo "$P1" | grep -q "&lt;script&gt;alert(1)&lt;/script&gt;&lt;img" && ! echo "$P1" | grep -q "<script>alert(1)" && ! echo "$P1" | grep -q "<img src=x"'
 ok "Chat : limite de débit (429)" 'for i in 1 2 3 4 5 6 7; do q h$R -o /dev/null -d message=spam$i $B/api/parties/$CC/chat; done; [ "$(q h$R -o /dev/null -w %{http_code} -d message=encore $B/api/parties/$CC/chat)" = 429 ]'
 # ---------- Mode Classé (solo / duo) ----------
-for n in r1 r2 r3 r4 r5 r6 r7 r8 r9 d1 d2 d3 s1 s2 s3 s4 s5 s6; do mk $n$R; done
+for n in r1 r2 r3 r4 r5 r6 r7 r8 r9 qa1 qa2 qa3 qa4 qa5 qb1 qb2 qb3 qb4 qc1 qc2 qc3 qc4 qd1 s1 s2 s3 s4; do mk $n$R; done
 api(){ curl -s $B/api/parties/$1 | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
 q r1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
 ok "Classé : 1 joueur solo en file, pas de partie" '[ "$(js r1$R "d[\"ranked_queue\"]")" = "Call of Duty" ] && [ "$(js r1$R "d[\"lobby\"]")" = None ]'
@@ -130,17 +130,35 @@ ok "Classé : le résultat modifie le SR (gagnant ↑, perdant ↓)" '[ "$(js $R
 ok "Classement CoD liste le joueur classé" 'curl -s "$B/classement" | grep -q "$RW"'
 ok "Jeu retiré refusé en classé (Valorant)" 'q r9$R -L -d game=Valorant $B/classe/rejoindre | grep -q "Jeu invalide"'
 ok "Jeu retiré refusé en partie rapide (Fortnite)" 'q r9$R -L -d "gm=Fortnite|1v1" $B/matchmaking/rejoindre | grep -q "Jeu ou mode invalide"'
-ok "Matchmaking : uniquement Call of Duty (classé solo/duo 2 max)" 'P4=$(curl -s $B/matchmaking); echo "$P4" | grep -q "Solo ou duo (2 max)" && ! echo "$P4" | grep -Eq "Valorant|Fortnite|CS2|Rocket League|EA FC|League of Legends"'
-DC=$(q d1$R -L -d "game=Call of Duty" $B/classe/duo | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
-ok "Duo créé avec code (5 car.)" '[ ${#DC} = 5 ]'
-q d1$R -o /dev/null -d pseudo=d2$R $B/classe/duo/inviter
-DID=$(q d2$R $B/matchmaking | grep -o "name=\"id\" value=\"[0-9]*\"" | grep -o "[0-9]*")
-ok "Invitation duo reçue et acceptée" 'q d2$R -L -d id=$DID $B/classe/duo/accepter | grep -q "Duo rejoint"'
-ok "Duo de 3 refusé (2 max)" 'q d3$R -L -d code=$DC $B/classe/duo/rejoindre | grep -q "Duo complet"'
-q d1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
-for n in s1 s2 s3 s4 s5 s6; do q $n$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre; done
-DL=$(js d1$R 'd["lobby"]')
-ok "Duo classé : partie 4v4 créée, duo dans la même équipe" '[ ${#DL} = 6 ] && [ "$(api $DL "d[\"classe\"]")" = True ] && [ "$(api $DL "len(d[\"joueurs\"])")" = 8 ] && [ "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d1$R\"][0]")" = "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d2$R\"][0]")" ]'
+ok "Matchmaking : uniquement Call of Duty (classé solo ou quatuor 4 max)" 'P4=$(curl -s $B/matchmaking); echo "$P4" | grep -q "Solo ou quatuor (4 max)" && ! echo "$P4" | grep -qi "duo" && ! echo "$P4" | grep -Eq "Valorant|Fortnite|CS2|Rocket League|EA FC|League of Legends"'
+# ---------- Classé : quatuor (groupe pré-formé de 4) ----------
+team(){ api $1 '[p["equipe"] for p in d["joueurs"] if p["pseudo"]=="'$2'"][0]'; }
+QC=$(q qa1$R -L -d "game=Call of Duty" $B/classe/quatuor | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+ok "Quatuor créé avec code (5 car.) + wording" '[ ${#QC} = 5 ] && q qa1$R $B/matchmaking | grep -q "Mon quatuor · 1/4" && q qa1$R $B/matchmaking | grep -q "Dissoudre le quatuor"'
+ok "Quatuor : rejoindre par code (insensible à la casse)" 'q qa2$R -L -d code=${QC,,} $B/classe/quatuor/rejoindre | grep -q "Quatuor rejoint" && q qa3$R -L -d code=$QC $B/classe/quatuor/rejoindre | grep -q "Quatuor rejoint"'
+ok "Quatuor : recherche refusée à 3/4 (incomplet)" 'q qa1$R -L -d "game=Call of Duty" $B/classe/rejoindre | grep -q "Quatuor incomplet (3/4)" && [ "$(js qa1$R "d[\"ranked_queue\"]")" = None ]'
+q qa4$R -o /dev/null -d code=$QC $B/classe/quatuor/rejoindre
+ok "Quatuor : 5e membre refusé (4 max)" 'q qa5$R -L -d code=$QC $B/classe/quatuor/rejoindre | grep -q "Quatuor complet : 4 joueurs maximum"'
+ok "Quatuor : un membre ne peut pas lancer la recherche" 'q qa2$R -L -d "game=Call of Duty" $B/classe/rejoindre | grep -q "Seul le chef du quatuor"'
+QA4=$(q qa1$R $B/matchmaking | grep -o "name=\"user_id\" value=\"[0-9]*\"" | tail -1 | grep -o "[0-9]\+")
+ok "Quatuor : un membre ne peut pas exclure" 'q qa2$R -L -d user_id=$QA4 $B/classe/quatuor/exclure | grep -q "Seul le chef"'
+ok "Quatuor : le chef exclut un membre (CSRF requis)" '[ "$(command curl -s -b /tmp/mm_qa1$R -o /dev/null -w %{http_code} -d user_id=$QA4 $B/classe/quatuor/exclure)" = 403 ] && q qa1$R -L -d user_id=$QA4 $B/classe/quatuor/exclure | grep -q "exclu du quatuor" && q qa1$R $B/matchmaking | grep -q "Mon quatuor · 3/4"'
+ok "Quatuor : un membre quitte puis revient" 'q qa3$R -L -d x=1 $B/classe/quatuor/quitter | grep -q "Tu as quitté le quatuor" && q qa3$R -L -d code=$QC $B/classe/quatuor/rejoindre | grep -q "Quatuor rejoint"'
+q qa5$R -o /dev/null -d code=$QC $B/classe/quatuor/rejoindre
+q qa1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
+ok "Quatuor complet en file (4 joueurs, pas encore de partie)" '[ "$(js qa5$R "d[\"ranked_queue\"]")" = "Call of Duty" ] && [ "$(js qa1$R "d[\"lobby\"]")" = None ]'
+for n in s1 s2 s3 s4; do q $n$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre; done
+QL=$(js qa1$R 'd["lobby"]')
+ok "Classé : quatuor vs 4 solos → partie 4v4, quatuor = une équipe entière" '[ ${#QL} = 6 ] && [ "$(api $QL "len(d[\"joueurs\"])")" = 8 ] && T=$(team $QL qa1$R) && [ "$(team $QL qa2$R)" = $T ] && [ "$(team $QL qa3$R)" = $T ] && [ "$(team $QL qa5$R)" = $T ] && [ "$(team $QL s1$R)" != $T ] && [ "$(team $QL s4$R)" != $T ]'
+QB=$(q qb1$R -L -d "game=Call of Duty" $B/classe/quatuor | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+QCC=$(q qc1$R -L -d "game=Call of Duty" $B/classe/quatuor | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+for n in 2 3 4; do q qb$n$R -o /dev/null -d code=$QB $B/classe/quatuor/rejoindre; q qc$n$R -o /dev/null -d code=$QCC $B/classe/quatuor/rejoindre; done
+q qb1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre; q qc1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
+QQ=$(js qb1$R 'd["lobby"]')
+ok "Classé : quatuor vs quatuor → chaque quatuor forme une équipe" '[ ${#QQ} = 6 ] && [ "$(js qc1$R "d[\"lobby\"]")" = "$QQ" ] && TB=$(team $QQ qb1$R) && TC=$(team $QQ qc1$R) && [ $TB != $TC ] && for n in 2 3 4; do [ "$(team $QQ qb$n$R)" = $TB ] && [ "$(team $QQ qc$n$R)" = $TC ] || exit 1; done'
+QD=$(q qd1$R -L -d "game=Call of Duty" $B/classe/quatuor | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+ok "Quatuor : le chef dissout le quatuor" 'q qd1$R -L -d x=1 $B/classe/quatuor/quitter | grep -q "Quatuor dissous" && q qa4$R -L -d code=$QD $B/classe/quatuor/rejoindre | grep -q "Quatuor introuvable"'
+ok "Quatuor : nom du membre échappé / code invalide refusé" 'q qa4$R -L --data-urlencode "code=<b>" $B/classe/quatuor/rejoindre | grep -q "Code de quatuor invalide"'
 ok "Site mono-jeu : accueil, tournois et classement sans autre jeu" '! curl -s $B/ | grep -Eq "Valorant|Fortnite|CS2|Rocket League|EA FC|League of Legends" && curl -s $B/ | grep -q "Modes Call of Duty" && ! curl -s $B/tournois | grep -q "name=\"jeu\"" && ! curl -s $B/classement | grep -q "class=\"tabs\""'
 ok "Admin : tournoi d un jeu retiré forcé en Call of Duty" 'curl -s -c $A -b $A -L -d "name=Forcé+$R&game=Valorant&platform=PC&format=solo&max_slots=4&start_date=2030-01-02T20:00&reg_close=2030-01-01T20:00" $B/admin/tournois | grep -q "Call of Duty · PC"'
 # ---------- Points LiveRoums (LP) & boutique ----------

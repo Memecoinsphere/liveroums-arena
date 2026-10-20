@@ -14,7 +14,7 @@ Variable conseillée en production : `SESSION_SECRET`.
 **Comptes d'exemple**
 - Admin : `admin@liveroums.gg` / `Admin123!`
 
-Le site est **100 % Call of Duty** : un seul jeu (tournois, classé 4v4 solo/duo, parties rapides 4v4/2v2/1v1, parties privées). Seul le compte admin est créé au démarrage (mot de passe remplaçable via `ADMIN_PASSWORD`).
+Le site est **100 % Call of Duty** : un seul jeu (tournois, classé 4v4 solo/quatuor, parties rapides 4v4/2v2/1v1, parties privées). Seul le compte admin est créé au démarrage (mot de passe remplaçable via `ADMIN_PASSWORD`).
 
 ## Fonctionnalités
 - **Accueil** : hero, tournois à la une, modes Call of Duty.
@@ -43,7 +43,7 @@ Le site est **100 % Call of Duty** : un seul jeu (tournois, classé 4v4 solo/duo
 - **Activision ID, PlayStation Network, Xbox Live, Battle.net** : saisie manuelle de l'ID, marquée « non vérifié ». Une vérification réelle demande les API partenaires officielles (PSN/Xbox : programmes partenaires fermés ; Activision, Battle.net : OAuth avec application approuvée et clés client).
 
 ## Matchmaking & parties
-- `/matchmaking` : files Call of Duty par mode (4v4, 2v2, 1v1) + file classée 4v4 (solo ou duo, 2 max). Dès que 2×N joueurs attendent, une partie est créée avec un **code à 6 caractères**, équipes équilibrées par SR (tri décroissant + affectation à l'équipe la plus faible). L'hôte est le premier joueur en file.
+- `/matchmaking` : files Call of Duty par mode (4v4, 2v2, 1v1) + file classée 4v4 (solo ou quatuor : groupe pré-formé de 4 via code, une équipe entière). Dès que 2×N joueurs attendent, une partie est créée avec un **code à 6 caractères**, équipes équilibrées par SR (tri décroissant + affectation à l'équipe la plus faible). L'hôte est le premier joueur en file.
 - Fin de partie (hôte ou admin déclare l'équipe gagnante) : SR mis à jour, les joueurs d'une partie publique sont remis **en fin de file**, et les joueurs en attente sont immédiatement placés dans une nouvelle partie.
 - Partie privée : création avec code, « Rejoindre avec un code », démarrage automatique quand elle est complète (ou « Lancer maintenant » par l'hôte).
 - Mises à jour en direct par polling toutes les 3 s (`/api/matchmaking`, `/api/parties/<code>`), redirection automatique vers la partie trouvée.
