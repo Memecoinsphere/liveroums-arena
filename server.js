@@ -13,10 +13,20 @@ const { esc, layout, card, status, GAMES, PLATFORMS } = V;
 
 const app = express();
 app.set('trust proxy', 1);
-app.use(express.urlencoded({ extended: true }));
-app.use(express.static(__dirname + '/public'));
-app.use(session({ secret: process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex'), resave: false, saveUninitialized: false,
-  cookie: { httpOnly: true, sameSite: 'lax', maxAge: 7 * 864e5 } }));
+const SEC = require('./security');
+if (SEC.PROD && !process.env.PUBLIC_URL) console.warn('⚠ PUBLIC_URL non défini : les URL de retour OAuth/OpenID utiliseront l\'en-tête Host.');
+SEC.headers(app);
+app.use(express.static(__dirname + '/public', { maxAge: SEC.PROD ? '1h' : 0 }));
+app.use(express.urlencoded({ extended: false, limit: '32kb', parameterLimit: 200 }));
+app.use(SEC.sessions());
+app.use((req, res, next) => { // HTML : nonce CSP sur les scripts + jeton CSRF dans les formulaires
+  const send = res.send.bind(res);
+  res.send = body => send(typeof body === 'string' && body.startsWith('<!doctype html>') ? SEC.decorate(body, req, res) : body);
+  next();
+});
+app.get('/api/csrf', (req, res) => res.set('Cache-Control', 'no-store').json({ csrf: SEC.token(req) }));
+app.use(SEC.csrf);
+app.use('/api/', SEC.limits.api);
 app.use((req, res, next) => {
   B.autoGenerate();
   req.user = req.session.uid ? db.prepare('SELECT id,pseudo,email,platform,game_id,is_admin FROM users WHERE id=?').get(req.session.uid) : null;
@@ -25,6 +35,9 @@ app.use((req, res, next) => {
   req.flash = (type, msg) => { req.session.flash = { type, msg }; };
   next();
 });
+app.use(['/roue/tourner', '/roue/payer'], SEC.limits.wheel);
+app.use('/boutique/acheter', SEC.limits.purchase);
+app.use((req, res, next) => req.method === 'POST' ? SEC.limits.writes(req, res, next) : next());
 const auth = (req, res, next) => req.user ? next() : (req.flash('err', 'Connecte-toi pour continuer.'), res.redirect(303, '/connexion?next=' + encodeURIComponent(req.originalUrl)));
 const admin = (req, res, next) => req.user?.is_admin ? next() : res.status(403).send(layout('Accès refusé', req.user, { type: 'err', msg: 'Réservé aux administrateurs.' }, ''));
 
@@ -59,7 +72,7 @@ app.get('/tournois', (req, res) => {
     .filter(t => (!jeu || t.game === jeu) && (!plateforme || t.platform === plateforme) && (!format || t.format === format)
       && (!statut || status(t).key === statut) && (!q || t.name.toLowerCase().includes(String(q).toLowerCase())));
   const L = { jeu: 'Tous les jeux', plateforme: 'Toutes plateformes', format: 'Tous formats', statut: 'Tous statuts' };
-  const sel = (name, val, opts) => `<select name="${name}" onchange="this.form.submit()"><option value="">${L[name]}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
+  const sel = (name, val, opts) => `<select name="${name}" data-autosubmit><option value="">${L[name]}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   res.page('Tournois', `<section><h1>Tournois</h1>
   <form class="filters" method="get"><input name="q" placeholder="🔍 Rechercher…" value="${esc(q)}">
   ${sel('jeu', jeu, Object.keys(GAMES).map(g => [g, g]))}${sel('plateforme', plateforme, PLATFORMS.map(p => [p, p]))}
@@ -121,36 +134,44 @@ app.get('/inscription', (req, res) => res.page('Créer un compte', `<section cla
   <label>Mot de passe (8 caractères min.)<input type="password" name="password" required minlength="8"></label>
   <label>Plateforme principale<select name="platform">${platformOpts('PC')}</select></label><label>ID de jeu (Riot ID, Epic, PSN…)<input name="game_id" maxlength="40" placeholder="Pseudo#1234"></label>
   <button class="btn lg">Créer mon compte</button><p class="muted">Déjà inscrit ? <a href="/connexion">Connexion</a></p></form></section>`));
-app.post('/inscription', async (req, res) => {
+app.post('/inscription', SEC.limits.signup, async (req, res, nextErr) => { try {
   const { pseudo = '', email = '', password = '', platform = '', game_id = '' } = req.body;
   const err = m => { req.flash('err', m); res.redirect(303, '/inscription'); };
   if (!/^[A-Za-z0-9_\-.]{3,20}$/.test(pseudo)) return err('Pseudo invalide (3-20 caractères alphanumériques).');
-  if (!/^\S+@\S+\.\S+$/.test(email)) return err('Email invalide.');
-  if (password.length < 8) return err('Mot de passe trop court (8 caractères minimum).');
+  if (typeof email !== 'string' || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) return err('Email invalide.');
+  if (typeof password !== 'string' || password.length < 8) return err('Mot de passe trop court (8 caractères minimum).');
+  if (password.length > 72) return err('Mot de passe trop long (72 caractères maximum).');
+  if (typeof game_id !== 'string' || game_id.length > 40) return err('ID de jeu trop long (40 caractères maximum).');
   if (!PLATFORMS.includes(platform)) return err('Plateforme invalide.');
   if (db.prepare('SELECT 1 FROM users WHERE pseudo=? OR email=?').get(pseudo, email.toLowerCase())) return err('Pseudo ou email déjà utilisé.');
   const hash = await bcrypt.hash(password, 12);
   const id = db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id) VALUES(?,?,?,?,?)').run(pseudo, email.toLowerCase(), hash, platform, game_id.trim()).lastInsertRowid;
-  req.session.regenerate(() => { req.session.uid = id; req.session.flash = { type: 'ok', msg: `Bienvenue ${pseudo} !` }; res.redirect(303, '/profil'); });
-});
+  req.session.regenerate(e => { if (e) return nextErr(e); req.session.uid = id; req.session.flash = { type: 'ok', msg: `Bienvenue ${pseudo} !` }; res.redirect(303, '/profil'); });
+} catch (e) { nextErr(e); } });
 app.get('/connexion', (req, res) => res.page('Connexion', `<section class="form-wrap"><h1>Connexion</h1><form method="post" class="form">
-  <input type="hidden" name="next" value="${esc(req.query.next || '/profil')}"><label>Email ou pseudo<input name="login" required></label>
+  <input type="hidden" name="next" value="${esc(SEC.safeNext(req.query.next))}"><label>Email ou pseudo<input name="login" required maxlength="254" autocomplete="username"></label>
   <label>Mot de passe<input type="password" name="password" required></label><button class="btn lg">Se connecter</button>
   <a class="btn discord lg" href="/auth/discord">💬 Se connecter avec Discord</a>
   <p class="muted">Pas de compte ? <a href="/inscription">Inscription</a></p></form></section>`));
-app.post('/connexion', async (req, res) => {
-  const { login = '', password = '' } = req.body; const next = String(req.body.next || '/profil');
-  const u = db.prepare('SELECT * FROM users WHERE email=? OR pseudo=?').get(String(login).toLowerCase(), login);
-  if (!u || !(await bcrypt.compare(String(password), u.password_hash))) { req.flash('err', 'Identifiants incorrects.'); return res.redirect(303, '/connexion'); }
-  req.session.regenerate(() => { req.session.uid = u.id; res.redirect(303, next.startsWith('/') && !next.startsWith('//') ? next : '/profil'); });
+const DUMMY = bcrypt.hashSync(crypto.randomBytes(16).toString('hex'), 12); // temps constant si le compte n'existe pas
+app.post('/connexion', SEC.limits.login, async (req, res, nextErr) => { try {
+  const login = String(req.body.login || '').slice(0, 254), password = String(req.body.password || '').slice(0, 200); const next = SEC.safeNext(req.body.next);
+  const wait = SEC.lockedFor(login);
+  if (wait) { req.flash('err', `Trop de tentatives échouées. Réessaie dans ${Math.ceil(wait / 60)} minute(s).`); return res.redirect(303, '/connexion'); }
+  const u = db.prepare('SELECT * FROM users WHERE email=? OR pseudo=?').get(login.toLowerCase(), login);
+  const okPw = await bcrypt.compare(password, u ? u.password_hash : DUMMY);
+  if (!u || !okPw) { SEC.loginFailed(login); req.flash('err', 'Identifiants incorrects.'); return res.redirect(303, '/connexion'); }
+  SEC.loginOk(login);
+  req.session.regenerate(e => { if (e) return nextErr(e); req.session.uid = u.id; res.redirect(303, next); });
+} catch (e) { nextErr(e); } 
 });
-app.post('/deconnexion', (req, res) => req.session.destroy(() => res.redirect(303, '/')));
+app.post('/deconnexion', (req, res) => req.session.destroy(() => { res.clearCookie('lr.sid', { httpOnly: true, sameSite: 'lax', secure: SEC.PROD }); res.redirect(303, '/'); }));
 
 // ---------- Profil ----------
 app.get('/profil', auth, (req, res) => {
   const regs = db.prepare(`SELECT t.id, tm.name team FROM registrations r JOIN tournaments t ON t.id=r.tournament_id LEFT JOIN teams tm ON tm.id=r.team_id WHERE r.user_id=? ORDER BY t.start_date`).all(req.user.id);
   const rows = regs.map(r => { const t = getT(r.id); const s = status(t); return `<tr><td><a href="/tournois/${t.id}">${esc(t.name)}</a></td><td>${esc(t.game)}</td><td>${r.team ? '👥 ' + esc(r.team) : 'Solo'}</td><td>${V.fmtDate(t.start_date)}</td><td><span class="badge ${s.key}">${s.label}</span></td>
-    <td>${!t.bracket_generated ? `<form method="post" action="/tournois/${t.id}/desinscription" onsubmit="return confirm('Se désinscrire ?')"><button class="btn ghost sm">Se désinscrire</button></form>` : '—'}</td></tr>`; }).join('');
+    <td>${!t.bracket_generated ? `<form method="post" action="/tournois/${t.id}/desinscription" data-confirm="Se désinscrire ?"><button class="btn ghost sm">Se désinscrire</button></form>` : '—'}</td></tr>`; }).join('');
   res.page('Mon profil', `<section>${P.bannerHtml(req.user.id)}<div class="profile">${P.avatarHtml(req.user.id, req.user.pseudo, db.prepare('SELECT discord_avatar FROM users WHERE id=?').get(req.user.id).discord_avatar)}<div>${P.h1Html(req.user.id, req.user.pseudo, req.user.is_admin ? '<span class="badge ex">Admin</span>' : '')}
   <p class="muted">${esc(req.user.email)} · ${esc(req.user.platform)} · ID de jeu : ${esc(req.user.game_id || '—')}</p></div></div>
   <p><a href="/joueurs/${encodeURIComponent(req.user.pseudo)}">Voir mon profil public →</a></p>
@@ -178,6 +199,9 @@ app.get('/admin/tournois/nouveau', auth, admin, (req, res) => res.page('Créer u
 app.post('/admin/tournois', auth, admin, (req, res) => {
   const b = req.body; const fmt = b.format === 'equipe' ? 'equipe' : 'solo';
   const ts = fmt === 'solo' ? 1 : Math.max(2, Math.min(10, +b.team_size || 2)); const slots = Math.max(2, Math.min(256, +b.max_slots || 0));
+  const D = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
+  const len = (v, n) => v == null || (typeof v === 'string' && v.length <= n);
+  if (!len(b.name, 80) || !len(b.cashprize, 40) || !len(b.rules, 5000) || !len(b.description, 2000) || !D.test(b.start_date || '') || !D.test(b.reg_close || '')) { req.flash('err', 'Champs invalides (longueur ou format de date).'); return res.redirect(303, '/admin/tournois/nouveau'); }
   if (!b.name || !GAMES[b.game] || !PLATFORMS.includes(b.platform) || !b.start_date || !b.reg_close) { req.flash('err', 'Champs invalides.'); return res.redirect(303, '/admin/tournois/nouveau'); }
   if (b.reg_close > b.start_date) { req.flash('err', 'La clôture doit précéder le début.'); return res.redirect(303, '/admin/tournois/nouveau'); }
   const id = db.prepare(`INSERT INTO tournaments(name,game,platform,format,team_size,max_slots,cashprize,start_date,reg_close,rules,description,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)
@@ -189,9 +213,10 @@ app.post('/admin/tournois/:id/bracket', auth, admin, (req, res) => {
   if (B.entries(req.params.id).length < 2) req.flash('err', 'Il faut au moins 2 inscrits.'); else { B.generate(req.params.id); req.flash('ok', 'Bracket généré.'); }
   res.redirect(303, `/tournois/${req.params.id}`);
 });
-app.post('/admin/tournois/:id/match/:mid', auth, admin, (req, res) => { B.setWinner(+req.params.id, +req.params.mid, req.body.winner); res.redirect(303, `/tournois/${req.params.id}`); });
+app.post('/admin/tournois/:id/match/:mid', auth, admin, (req, res) => { B.setWinner(+req.params.id, +req.params.mid, String(req.body.winner || '')); res.redirect(303, `/tournois/${req.params.id}`); });
 
-app.get('/api/tournois', (req, res) => res.json(db.prepare(TQ).all().map(t => ({ ...t, statut: status(t).key }))));
+app.get('/api/tournois', (req, res) => res.json(db.prepare(TQ).all().map(({ created_by, ...t }) => ({ ...t, statut: status(t).key }))));
+SEC.errors(app, layout);
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`LiveRoums Arena sur http://localhost:${PORT}`));

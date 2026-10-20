@@ -8,12 +8,14 @@
     "seed": "node db.js --reset"
   },
   "dependencies": {
-    "bcrypt": "^5.1.1",
+    "bcrypt": "^6.0.0",
     "better-sqlite3": "^11.3.0",
     "discord.js": "^14.27.0",
     "dotenv": "^18.0.8",
     "express": "^4.21.0",
-    "express-session": "^1.18.0"
+    "express-rate-limit": "^8.7.1",
+    "express-session": "^1.18.0",
+    "helmet": "^8.3.0"
   },
   "engines": {
     "node": ">=20"

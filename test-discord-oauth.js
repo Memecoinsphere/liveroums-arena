@@ -47,7 +47,10 @@ function client() {
     for (const c of r.headers.getSetCookie()) { const [kv] = c.split(';'); const i = kv.indexOf('='); jar[kv.slice(0, i)] = kv.slice(i + 1); }
     return r;
   };
-  const form = (url, data) => go(url, { method: 'POST', body: new URLSearchParams(data), headers: { 'Content-Type': 'application/x-www-form-urlencoded' } });
+  const form = async (url, data) => { // jeton CSRF de la session (requis sur tout POST)
+    const { csrf } = await (await go('/api/csrf')).json();
+    return go(url, { method: 'POST', body: new URLSearchParams(data), headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'X-CSRF-Token': csrf } });
+  };
   const page = async url => (await go(url)).text();
   // Parcours complet : bouton -> URL authorize (state) -> retour callback avec le code
   const discord = async code => {

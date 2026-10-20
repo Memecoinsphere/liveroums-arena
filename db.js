@@ -32,8 +32,10 @@ function seed() {
   if (db.prepare('SELECT COUNT(*) c FROM users').get().c > 0) return;
   // Seul le compte admin est créé : aucune donnée d'exemple
   db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id,is_admin) VALUES(?,?,?,?,?,?)')
-    .run('Admin', 'admin@liveroums.gg', bcrypt.hashSync('Admin123!', 10), 'PC', 'admin#0001', 1);
-  console.log('Base initialisée. Admin : admin@liveroums.gg / Admin123!');
+    .run('Admin', 'admin@liveroums.gg', bcrypt.hashSync(process.env.ADMIN_PASSWORD || 'Admin123!', 12), 'PC', 'admin#0001', 1);
+  // ADMIN_PASSWORD (variable d'environnement) remplace le mot de passe par défaut, faible, à la création de la base
+  console.log(process.env.ADMIN_PASSWORD ? 'Base initialisée. Admin : admin@liveroums.gg (mot de passe : ADMIN_PASSWORD)'
+    : 'Base initialisée. Admin : admin@liveroums.gg / Admin123! — ⚠ mot de passe par défaut faible : définis ADMIN_PASSWORD');
 }
 seed();
 

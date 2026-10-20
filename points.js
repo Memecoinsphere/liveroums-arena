@@ -75,7 +75,7 @@ const level = xp => { const lv = Math.floor(Math.sqrt(xp / 100)) + 1; const cur 
 function progress(uid, c) {
   const since = utcStart(c.period === 'jour' ? parisDay() : parisWeek());
   const where = { played: '1=1', won: 'won=1', tourney: "won=1 AND source='tournoi'" }[c.metric];
-  return Math.min(c.goal, db.prepare(`SELECT COUNT(*) n FROM match_log WHERE user_id=? AND created_at>=? AND ${where}`).get(uid, since).n);
+  return Math.min(c.goal, db.prepare(`SELECT COUNT(*) n FROM match_log WHERE user_id=? AND rewarded=1 AND created_at>=? AND ${where}`).get(uid, since).n);
 }
 const periodKey = c => c.period === 'jour' ? parisDay() : parisWeek();
 function checkChallenges(uid) {
@@ -91,13 +91,23 @@ const SRC = { classe: 'partie classée', rapide: 'partie rapide', privee: 'parti
 for (const col of ['boost_until TEXT', 'bonus_spins INTEGER NOT NULL DEFAULT 0'])
   if (!db.prepare('PRAGMA table_info(user_points)').all().some(c => c.name === col.split(' ')[0])) db.exec(`ALTER TABLE user_points ADD COLUMN ${col}`);
 const boostActive = uid => { const b = state(uid).boost_until; return !!b && b > new Date().toISOString(); };
+// Anti-farm : plafond quotidien de matchs récompensés, et parties privées limitées par paire d'adversaires
+for (const col of ['opp TEXT', 'rewarded INTEGER NOT NULL DEFAULT 1'])
+  if (!db.prepare('PRAGMA table_info(match_log)').all().some(c => c.name === col.split(' ')[0])) db.exec(`ALTER TABLE match_log ADD COLUMN ${col}`);
+const CAPS = { DAILY_WINS: 15, DAILY_LOSSES: 15, PRIVATE_SAME_OPP: 2 };
 function recordMatch(winners, losers, source) {
-  const label = SRC[source] || source;
+  const label = SRC[source] || source, since = utcStart(parisDay());
+  const key = ids => [...new Set(ids)].sort((a, b) => a - b).join(',');
+  const cnt = (uid, won, extra = '', ...a) => db.prepare(`SELECT COUNT(*) n FROM match_log WHERE user_id=? AND won=? AND rewarded=1 AND created_at>=? ${extra}`).get(uid, won, since, ...a).n;
+  const out = { capped: [] };
   db.transaction(() => {
     for (const uid of new Set(winners)) {
       ensure(uid);
-      const firstToday = !db.prepare("SELECT 1 FROM match_log WHERE user_id=? AND won=1 AND created_at>=?").get(uid, utcStart(parisDay()));
-      db.prepare('INSERT INTO match_log(user_id,won,source) VALUES(?,1,?)').run(uid, source);
+      const opp = key(losers);
+      const capped = cnt(uid, 1) >= CAPS.DAILY_WINS || (source === 'privee' && cnt(uid, 1, "AND source='privee' AND opp=?", opp) >= CAPS.PRIVATE_SAME_OPP);
+      const firstToday = !cnt(uid, 1);
+      db.prepare('INSERT INTO match_log(user_id,won,source,opp,rewarded) VALUES(?,1,?,?,?)').run(uid, source, opp, capped ? 0 : 1);
+      if (capped) { out.capped.push(uid); continue; }
       add(uid, PTS.WIN, `Victoire (${label})`);
       if (boostActive(uid)) add(uid, PTS.WIN, 'Boost Roue du jour : victoire x2');
       if (firstToday) add(uid, PTS.FIRST_WIN_BONUS, 'Bonus première victoire du jour (x2)');
@@ -108,12 +118,16 @@ function recordMatch(winners, losers, source) {
     }
     for (const uid of new Set(losers)) {
       ensure(uid);
-      db.prepare('INSERT INTO match_log(user_id,won,source) VALUES(?,0,?)').run(uid, source);
-      add(uid, PTS.LOSS, `Participation (${label})`);
+      const opp = key(winners);
+      const capped = cnt(uid, 0) >= CAPS.DAILY_LOSSES || (source === 'privee' && cnt(uid, 0, "AND source='privee' AND opp=?", opp) >= CAPS.PRIVATE_SAME_OPP);
+      db.prepare('INSERT INTO match_log(user_id,won,source,opp,rewarded) VALUES(?,0,?,?,?)').run(uid, source, opp, capped ? 0 : 1);
       db.prepare('UPDATE user_points SET win_streak=0 WHERE user_id=?').run(uid);
+      if (capped) continue;
+      add(uid, PTS.LOSS, `Participation (${label})`);
       checkChallenges(uid);
     }
   })();
+  return out;
 }
 
 // Bonus de connexion quotidien : +25, +5 par jour de série consécutif (max +50 de bonus)
@@ -152,7 +166,7 @@ function deco(uid) {
   return d;
 }
 
-module.exports = { PTS, RARITY, SLOTS, ITEMS, ITEM, CHALLENGES, add, balance, state, level, progress, recordMatch, boostActive, dailyLogin, buy, equip, unequip, deco, parisDay, periodKey };
+module.exports = { CAPS, PTS, RARITY, SLOTS, ITEMS, ITEM, CHALLENGES, add, balance, state, level, progress, recordMatch, boostActive, dailyLogin, buy, equip, unequip, deco, parisDay, periodKey };
 
 // ---- Rendu des cosmétiques équipés ----
 const { esc } = require('./views');

@@ -12,7 +12,7 @@ if (!process.env.GUARD_CHILD) {
   require('./roue')({ get() {}, post(p, ...f) { if (p === '/roue/tourner') spin = f[1]; } }, {});
   let n = 0;
   for (let i = 0; i < 300; i++) {
-    db.prepare('DELETE FROM wheel_spins').run(); let j;
+    db.prepare('DELETE FROM prize_claims').run(); db.prepare('DELETE FROM wheel_spins').run(); let j;
     spin({ user: { id: 1 }, body: { force: 'sub' }, get: () => 'application/json' }, { json: x => (j = x), status() { return this; } });
     if (j.segment === 'sub') n++;
   }

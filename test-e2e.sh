@@ -2,6 +2,18 @@
 # Test de bout en bout : inscription, connexion, inscription tournoi, doublon, capacité, désinscription
 # Démarrer le serveur avec NODE_ENV=test WHEEL_TEST_FORCE=1 (tirage forcé de la Roue, test uniquement) ; BASE_URL optionnel. Lancer depuis la racine du dépôt.
 B=${BASE_URL:-http://localhost:3000}; J=$(mktemp); P=0; F=0
+# Client curl : chaque bocal de cookies = un « joueur » avec sa propre IP simulée (X-Forwarded-For, proxy de confiance)
+# et, pour toute requête d'écriture, le jeton CSRF de sa session (GET /api/csrf). « command curl » contourne ce wrapper.
+curl(){
+  local jar="" post=0 a prev=""
+  for a in "$@"; do case "$prev" in -b|-c) jar=$a;; esac; case "$a" in -d|--data*|-X) post=1;; esac; prev=$a; done
+  local ip="10.$(( $(printf %s "${jar:-anon}" | cksum | cut -d" " -f1) % 250 )).$(( RANDOM % 250 )).$(( ${#jar} % 250 ))"
+  [ -n "$jar" ] && ip="10.$(( $(printf %s "$jar" | cksum | cut -d" " -f1) / 250 % 250 )).$(( $(printf %s "$jar" | cksum | cut -d" " -f1) % 250 )).7"
+  if [ $post = 1 ] && [ -n "$jar" ]; then
+    local tok=$(command curl -s -c "$jar" -b "$jar" -H "X-Forwarded-For: $ip" "$B/api/csrf" | sed 's/.*"csrf":"\([0-9a-f]*\)".*/\1/')
+    command curl -H "X-Forwarded-For: $ip" -H "X-CSRF-Token: $tok" "$@"
+  else command curl -H "X-Forwarded-For: $ip" "$@"; fi
+}
 ok(){ if eval "$2"; then echo "✅ $1"; P=$((P+1)); else echo "❌ $1"; F=$((F+1)); fi; }
 U=testeur$RANDOM
 c(){ curl -s -b $J -c $J "$@"; }
@@ -79,7 +91,7 @@ ok "Partie privée créée avec code" '[ ${#CODE} = 6 ] && curl -s $B/api/partie
 ok "Code invalide refusé" 'q q5$R -L -d code=ZZZZZZ $B/parties/rejoindre | grep -q "introuvable"'
 ok "Rejoindre par code → partie complète démarrée" '[ "$(q q5$R -o /dev/null -w %{redirect_url} -d code=${CODE,,} $B/parties/rejoindre)" = "$B/parties/$CODE" ] && curl -s $B/api/parties/$CODE | grep -q "en_cours"'
 A2=$(mktemp); curl -s -c $A2 -b $A2 -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
-M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/$TC | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
+M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/$TC | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"_csrf\" value=\"[0-9a-f]*\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
 SRW=$(js $W 'd["ratings"].get("CS2",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
 ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"CS2\"]")" -gt "$SRW" ]'
 # ---------- Chat de pré-partie ----------
@@ -172,4 +184,37 @@ ok "Roue : le gagnant saisit son pseudo Twitch" 'q sub$R -L -d twitch=Gagnant_$R
 ok "Admin : lot visible en attente sur /admin/lots" 'curl -s -b $A2 $B/admin/lots | grep -q "Gagnant_$R"'
 ok "Admin : marque le lot livré → visible par le gagnant" 'curl -s -b $A2 -L -d x=1 $B/admin/lots/$CID/livrer | grep -q "marqué comme livré" && q sub$R $B/roue | grep -q "Lot livré"'
 ok "Roue : gros gain affiché dans le fil" 'curl -s $B/roue | grep -q "Sub Twitch 1 mois</b>"'
+# ---------- Sécurité ----------
+H=$(command curl -s -D - -o /tmp/sec_home.html $B/)
+ok "Sécu : CSP à nonce + frame-ancestors none + object-src none" 'echo "$H" | grep -i "^content-security-policy:" | grep -q "script-src .self. .nonce-" && echo "$H" | grep -i "^content-security-policy:" | grep -q "frame-ancestors .none." && echo "$H" | grep -qi "object-src .none."'
+ok "Sécu : X-Frame-Options DENY, nosniff, Referrer-Policy, pas de X-Powered-By" 'echo "$H" | grep -qi "^x-frame-options: DENY" && echo "$H" | grep -qi "^x-content-type-options: nosniff" && echo "$H" | grep -qi "^referrer-policy: strict-origin-when-cross-origin" && ! echo "$H" | grep -qi "^x-powered-by"'
+ok "Sécu : chaque <script> porte le nonce de la CSP, aucun attribut on*" 'N=$(echo "$H" | grep -io "nonce-[^'"'"']*" | head -1 | cut -c7-); [ -n "$N" ] && ! grep -o "<script[^>]*>" /tmp/sec_home.html | grep -vq "nonce=\"$N\"" && ! curl -s $B/tournois | grep -Eq " on(change|submit|click)="'
+mk sec1$R; mk sec2$R
+ok "Sécu : cookie de session HttpOnly + SameSite=Lax" 'command curl -s -D - -o /dev/null -d "pseudo=ck$R&email=ck$R@t.gg&password=MotDePasse1&platform=PC" -H "X-CSRF-Token: x" $B/inscription | grep -qi "403" || true; command curl -s -c /tmp/ck$R -D - -o /dev/null $B/api/csrf | grep -i "^set-cookie: lr.sid=" | grep -qi "httponly" && grep -q lr.sid /tmp/ck$R && command curl -s -D - -o /dev/null $B/api/csrf | grep -i "^set-cookie" | grep -qi "samesite=lax"'
+ok "Sécu : CSRF — POST sans jeton refusé (403) sur la boutique" '[ "$(command curl -s -b /tmp/mm_sec1$R -o /dev/null -w %{http_code} -d item=badge_gg $B/boutique/acheter)" = 403 ]'
+ok "Sécu : CSRF — jeton falsifié refusé sur la roue (403)" '[ "$(command curl -s -b /tmp/mm_sec1$R -o /dev/null -w %{http_code} -H "X-CSRF-Token: deadbeef" -d x=1 $B/roue/tourner)" = 403 ]'
+ok "Sécu : CSRF — chat API JSON 403 sans jeton" 'command curl -s -b /tmp/mm_h$R -d message=csrf $B/api/parties/$CC/chat | grep -q "CSRF"'
+ok "Sécu : CSRF — admin sans jeton refusé" '[ "$(command curl -s -b $A2 -o /dev/null -w %{http_code} -d "pseudo=sec1$R&amount=99999" $B/admin/points)" = 403 ]'
+ok "Sécu : CSRF — formulaires rendus avec jeton _csrf" 'q sec1$R $B/boutique | grep -q "name=\"_csrf\" value=\"[0-9a-f]\{64\}\""'
+ok "Sécu : connexion — même message compte existant / inexistant (pas d énumération)" '[ "$(q sec2$R -L -d "login=sec2$R&password=mauvais1" $B/connexion | grep -o "Identifiants incorrects")" = "$(q sec2$R -L -d "login=inexistant$R&password=mauvais1" $B/connexion | grep -o "Identifiants incorrects")" ]'
+LK=/tmp/lk$R; for i in 1 2 3 4 5; do curl -s -c $LK -b $LK -o /dev/null -d "login=sec1$R&password=faux$i" $B/connexion; done
+ok "Sécu : verrouillage après 5 échecs (même avec le bon mot de passe)" 'curl -s -c $LK -b $LK -L -d "login=sec1$R&password=MotDePasse1" $B/connexion | grep -q "Trop de tentatives"'
+ok "Sécu : limite de débit inscription (6e compte même IP → 429)" 'for i in 1 2 3 4 5 6; do T=/tmp/rl$R$i; command curl -s -c $T -b $T -o /dev/null -H "X-Forwarded-For: 10.250.250.$((R%200))" $B/api/csrf; TK=$(command curl -s -c $T -b $T -H "X-Forwarded-For: 10.250.250.$((R%200))" $B/api/csrf | sed "s/.*\"csrf\":\"\([0-9a-f]*\)\".*/\1/"); C=$(command curl -s -c $T -b $T -o /dev/null -w %{http_code} -H "X-Forwarded-For: 10.250.250.$((R%200))" -H "X-CSRF-Token: $TK" -d "pseudo=rl$i$R&email=rl$i$R@t.gg&password=MotDePasse1&platform=PC" $B/inscription); done; [ "$C" = 429 ]'
+ok "Sécu : open redirect refusé après connexion (next=//evil.com)" '[ "$(q sec2$R -o /dev/null -w %{redirect_url} -d "login=sec2$R&password=MotDePasse1&next=//evil.com" $B/connexion)" = "$B/profil" ] && [ "$(q sec2$R -o /dev/null -w %{redirect_url} -d "login=sec2$R&password=MotDePasse1&next=/\\evil.com" $B/connexion)" = "$B/profil" ]'
+ok "Sécu : XSS — pseudo avec balises refusé à l inscription" 'curl -s -c /tmp/x$R -b /tmp/x$R -L --data-urlencode "pseudo=<img src=x>" -d "email=x$R@t.gg&password=MotDePasse1&platform=PC" $B/inscription | grep -q "Pseudo invalide"'
+TV=$(mkT "XSS Cup $RANDOM" "game=Valorant&platform=PC&format=equipe&team_size=2&max_slots=8&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
+q sec2$R -o /dev/null --data-urlencode "team_name=<script>alert(9)</script>" --data-urlencode "mates=<img src=x onerror=alert(8)>" -d rules=on $B/tournois/$TV/inscription
+ok "Sécu : XSS — nom d équipe et coéquipier échappés" 'P2=$(curl -s $B/tournois/$TV); echo "$P2" | grep -q "&lt;script&gt;alert(9)" && ! echo "$P2" | grep -q "<script>alert(9)" && ! echo "$P2" | grep -q "<img src=x"'
+ok "Sécu : XSS — pseudo Twitch avec balises refusé" 'q sub$R -L --data-urlencode "twitch=<b>x</b>" $B/roue/lots/$CID | grep -q "Pseudo Twitch invalide"'
+ok "Sécu : IDOR — impossible de modifier le lot d un autre joueur" 'q sec2$R -L -d twitch=Pirate_$R $B/roue/lots/$CID | grep -q "Lot introuvable" && ! curl -s -b $A2 $B/admin/lots | grep -q "Pirate_$R"'
+ok "Sécu : IDOR — non-admin refusé sur actions admin (lots, bracket, match, points)" '[ "$(q sec2$R -o /dev/null -w %{http_code} -d x=1 $B/admin/lots/$CID/livrer)" = 403 ] && [ "$(q sec2$R -o /dev/null -w %{http_code} -d x=1 $B/admin/tournois/$TC/bracket)" = 403 ] && [ "$(q sec2$R -o /dev/null -w %{http_code} -d winner=x $B/admin/tournois/$TC/match/1)" = 403 ] && [ "$(q sec2$R -o /dev/null -w %{http_code} -d "pseudo=sec2$R&amount=5" $B/admin/points)" = 403 ]'
+ok "Sécu : IDOR — non-membre ne peut ni lancer ni déclarer une partie" 'q sec2$R -L -d winner=1 $B/parties/$CC/resultat | grep -q "Seul l" && [ "$(api $CC "d[\"statut\"]")" = attente ]'
+ok "Sécu : corps de requête trop volumineux → 413" '[ "$(q sec2$R -o /dev/null -w %{http_code} --data-urlencode "message=$(head -c 40000 /dev/zero | tr "\0" a)" $B/api/parties/$CC/chat)" = 413 ]'
+ok "Sécu : 404 générique sans pile d appel" 'P3=$(curl -s $B/nexiste/pas); echo "$P3" | grep -q "Page introuvable" && ! echo "$P3" | grep -q "at "'
+ok "Sécu : /api/tournois n expose pas created_by" '! curl -s $B/api/tournois | grep -q created_by'
+# Anti-farm : la même paire en partie privée ne rapporte des LP que 2 fois par jour
+mk fa$R; mk fb$R
+farm(){ local C=$(q fa$R -o /dev/null -w %{redirect_url} -d "gm=EA FC|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$"); q fb$R -o /dev/null -d code=$C $B/parties/rejoindre; local T=$(api $C '[p["equipe"] for p in d["joueurs"] if p["pseudo"]=="fa'$R'"][0]'); q fa$R -o /dev/null -d winner=$T $B/parties/$C/resultat; }
+farm; farm; FW=$(pj fa$R 'sum(h["montant"] for h in d["historique"] if h["motif"]=="Victoire (partie privée)")'); farm
+ok "Anti-farm : 3e victoire privée contre le même adversaire sans LP" '[ "$FW" = 200 ] && [ "$(pj fa$R "sum(h[\"montant\"] for h in d[\"historique\"] if h[\"motif\"]==\"Victoire (partie privée)\")")" = 200 ]'
 echo "Résultat : $P réussis, $F échoués"
