@@ -129,6 +129,7 @@ module.exports = (app, { auth, admin }) => {
   app.post('/parties/rejoindre', auth, (req, res) => { const code = go(req, res, () => M.joinByCode(req.user.id, req.body.code)); if (code) res.redirect(303, `/parties/${code}`); });
 
   // ---------- Page d'une partie ----------
+  const CHAT = require('./chat')(app, { auth, rank });
   const lobbyState = code => {
     const l = db.prepare('SELECT * FROM lobbies WHERE code=?').get(String(code).toUpperCase()); if (!l) return null;
     const ps = db.prepare('SELECT p.*, u.pseudo FROM lobby_players p JOIN users u ON u.id=p.user_id WHERE lobby_id=? ORDER BY team, sr_before DESC').all(l.id);
@@ -160,6 +161,7 @@ module.exports = (app, { auth, admin }) => {
       ${isHost && ps.length >= 2 ? `<form method="post" action="/parties/${l.code}/lancer"><button class="btn ghost sm">Lancer maintenant</button></form>` : ''}</div>`
       : `<div class="versus">${team(1)}<div class="vs">VS</div>${team(2)}</div>`}
     ${l.status === 'termine' && inLobby && !l.is_private ? `<p class="muted">Tu as été remis dans la file ${esc(l.game)} ${l.mode}. <a href="/matchmaking">Voir le matchmaking</a></p>` : ''}
+    ${CHAT.html(req, l)}
     </section>${poll(`/api/parties/${l.code}`, s.v, 'prochaine')}`);
   });
   app.post('/parties/:code/lancer', auth, (req, res) => {

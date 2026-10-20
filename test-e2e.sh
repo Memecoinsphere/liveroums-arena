@@ -82,4 +82,23 @@ M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*"
 SRW=$(js $W 'd["ratings"].get("CS2",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
 ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"CS2\"]")" -gt "$SRW" ]'
 ok "Classement Fortnite liste le joueur après sa partie" 'curl -s "$B/classement?jeu=Fortnite" | grep -q "$HOST"'
+# ---------- Chat de pré-partie ----------
+mk h$R; mk o$R
+CC=$(q h$R -o /dev/null -w %{redirect_url} -d "gm=Valorant|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
+ok "Chat : non-membre refusé (lecture 403)" '[ "$(q o$R -o /dev/null -w %{http_code} $B/api/parties/$CC/chat)" = 403 ]'
+ok "Chat : non-membre refusé (envoi 403)" '[ "$(q o$R -o /dev/null -w %{http_code} -d message=intrus $B/api/parties/$CC/chat)" = 403 ]'
+ok "Chat : visiteur non connecté refusé" '[ "$(curl -s -o /dev/null -w %{http_code} $B/api/parties/$CC/chat)" = 403 ]'
+ok "Chat absent de la page pour un non-membre" '! q o$R $B/parties/$CC | grep -q "chatLog"'
+ok "Chat : membre poste un message" 'q h$R -d "message=Salut la team" $B/api/parties/$CC/chat | grep -q "\"ok\":true"'
+ok "Chat : message lu via l API (pseudo + heure)" 'q h$R $B/api/parties/$CC/chat | grep -q "\"texte\":\"Salut la team\".*\"heure\""'
+ok "Chat : admin peut lire" 'curl -s -b $A2 $B/api/parties/$CC/chat | grep -q "Salut la team"'
+ok "Chat : message > 300 caractères refusé" '[ "$(q h$R -o /dev/null -w %{http_code} -d message=$(printf "a%.0s" $(seq 301)) $B/api/parties/$CC/chat)" = 400 ]'
+sleep 1
+ok "Chat : épingler le code in-game" 'q h$R -d "code=PARTY-42XZ" $B/api/parties/$CC/chat/code | grep -q "PARTY-42XZ"'
+ok "Chat : code épinglé affiché + message système" 'q h$R $B/api/parties/$CC/chat | grep -q "\"code_ingame\":{\"code\":\"PARTY-42XZ\"" && q h$R $B/api/parties/$CC/chat | grep -q "\"systeme\":true,[^}]*épinglé"'
+ok "Chat : code épinglé en haut de la page" 'q h$R $B/parties/$CC | grep -q "id=\"pinCode\">PARTY-42XZ<"'
+sleep 1
+q h$R -o /dev/null --data-urlencode "message=<script>alert(1)</script><img src=x onerror=alert(2)>" $B/api/parties/$CC/chat
+ok "Chat : XSS échappé dans la page" 'P1=$(q h$R $B/parties/$CC); echo "$P1" | grep -q "&lt;script&gt;alert(1)&lt;/script&gt;&lt;img" && ! echo "$P1" | grep -q "<script>alert(1)" && ! echo "$P1" | grep -q "<img src=x"'
+ok "Chat : limite de débit (429)" 'for i in 1 2 3 4 5 6 7; do q h$R -o /dev/null -d message=spam$i $B/api/parties/$CC/chat; done; [ "$(q h$R -o /dev/null -w %{http_code} -d message=encore $B/api/parties/$CC/chat)" = 429 ]'
 echo "Résultat : $P réussis, $F échoués"
