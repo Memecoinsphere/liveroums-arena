@@ -2,6 +2,7 @@
 const db = require('./db');
 const M = require('./mm');
 const { esc } = require('./views');
+const P = require('./points');
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS lobby_messages(id INTEGER PRIMARY KEY, lobby_id INTEGER NOT NULL REFERENCES lobbies(id) ON DELETE CASCADE,
@@ -26,7 +27,8 @@ module.exports = (app, { auth, rank }) => {
   const messages = (l, after = 0) => db.prepare(`SELECT m.id, m.kind, m.body, m.created_at, u.pseudo, m.user_id FROM lobby_messages m LEFT JOIN users u ON u.id=m.user_id
     WHERE m.lobby_id=? AND m.id>? ORDER BY m.id DESC LIMIT 100`).all(l.id, after).reverse()
     .map(m => ({ id: m.id, systeme: m.kind === 'system', pseudo: m.pseudo || '', texte: m.body, heure: time(m.created_at),
-      rang: m.user_id && m.kind !== 'system' ? rank(M.getSR(m.user_id, l.game), true) : '' }));
+      rang: m.user_id && m.kind !== 'system' ? rank(M.getSR(m.user_id, l.game), true) : '', ...cos(m) }));
+  const cos = m => { if (!m.user_id || m.kind === 'system') return {}; const d = P.deco(m.user_id); return { couleur: d.color?.value || null, badge: d.badge?.value || null, titre: d.title?.value || null }; };
   const pin = l => { const p = db.prepare('SELECT p.code, u.pseudo FROM lobby_pins p LEFT JOIN users u ON u.id=p.user_id WHERE lobby_id=?').get(l.id); return p ? { code: p.code, par: p.pseudo } : null; };
   const guard = (req, res) => {
     const l = getLobby(req.params.code); if (!l) { res.status(404).json({ erreur: 'Partie introuvable.' }); return null; }
@@ -64,7 +66,7 @@ module.exports = (app, { auth, rank }) => {
 
   // Fenêtre de chat (rendu initial côté serveur, échappé ; mises à jour via textContent côté client)
   const msgHtml = m => m.systeme ? `<div class="cm sys" data-id="${m.id}"><span class="ct">${esc(m.heure)}</span> <span class="cb">${esc(m.texte)}</span></div>`
-    : `<div class="cm" data-id="${m.id}"><div class="ch"><b class="cp">${esc(m.pseudo)}</b> <span class="cr">${m.rang}</span> <span class="ct">${esc(m.heure)}</span></div><div class="cb">${esc(m.texte)}</div></div>`;
+    : `<div class="cm" data-id="${m.id}"><div class="ch">${m.badge ? `<span class="lp-badge">${m.badge}</span> ` : ''}<b class="cp"${m.couleur ? ` style="color:${m.couleur}"` : ''}>${esc(m.pseudo)}</b>${m.titre ? ` <span class="lp-title">${esc(m.titre)}</span>` : ''} <span class="cr">${m.rang}</span> <span class="ct">${esc(m.heure)}</span></div><div class="cb">${esc(m.texte)}</div></div>`;
   const html = (req, l) => {
     if (!canAccess(req.user, l)) return '';
     const ms = messages(l), p = pin(l), base = `/api/parties/${l.code}/chat`;
@@ -79,7 +81,7 @@ module.exports = (app, { auth, rank }) => {
 <script>(()=>{const B=${JSON.stringify(base)},log=document.getElementById('chatLog'),err=document.getElementById('chatErr');let last=${ms.length ? ms[ms.length - 1].id : 0};
 const el=(t,c,x)=>{const e=document.createElement(t);if(c)e.className=c;if(x!=null)e.textContent=x;return e;};
 const add=m=>{if(m.id<=last)return;last=m.id;log.querySelector('.empty')?.remove();const near=log.scrollHeight-log.scrollTop-log.clientHeight<80;const d=el('div','cm'+(m.systeme?' sys':''));
-if(m.systeme){d.append(el('span','ct',m.heure),' ',el('span','cb',m.texte));}else{const h=el('div','ch'),r=el('span','cr');r.innerHTML=m.rang;h.append(el('b','cp',m.pseudo),' ',r,' ',el('span','ct',m.heure));d.append(h,el('div','cb',m.texte));}
+if(m.systeme){d.append(el('span','ct',m.heure),' ',el('span','cb',m.texte));}else{const h=el('div','ch'),r=el('span','cr');r.innerHTML=m.rang;const p=el('b','cp',m.pseudo);if(m.couleur)p.style.color=m.couleur;if(m.badge)h.append(el('span','lp-badge',m.badge),' ');h.append(p);if(m.titre)h.append(' ',el('span','lp-title',m.titre));h.append(' ',r,' ',el('span','ct',m.heure));d.append(h,el('div','cb',m.texte));}
 log.append(d);if(near||m.mine)log.scrollTop=log.scrollHeight;};
 const setPin=p=>{document.getElementById('pinBox').classList.toggle('set',!!p);document.getElementById('pinCode').textContent=p?p.code:'—';document.getElementById('pinCopy').hidden=!p;
 document.getElementById('pinBy').textContent=p?'épinglé par '+p.par:"Aucun code pour l'instant : colle le code du lobby / de la party in-game.";};

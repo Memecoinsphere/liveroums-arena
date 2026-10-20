@@ -1,6 +1,6 @@
 #!/bin/bash
 # Test de bout en bout : inscription, connexion, inscription tournoi, doublon, capacité, désinscription
-B=http://localhost:3000; J=$(mktemp); P=0; F=0
+B=${BASE_URL:-http://localhost:3000}; J=$(mktemp); P=0; F=0
 ok(){ if eval "$2"; then echo "✅ $1"; P=$((P+1)); else echo "❌ $1"; F=$((F+1)); fi; }
 U=testeur$RANDOM
 c(){ curl -s -b $J -c $J "$@"; }
@@ -125,4 +125,27 @@ q d1$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre
 for n in s1 s2 s3 s4; do q $n$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre; done
 DL=$(js d1$R 'd["lobby"]')
 ok "Duo classé : partie 3v3 créée, duo dans la même équipe" '[ ${#DL} = 6 ] && [ "$(api $DL "d[\"classe\"]")" = True ] && [ "$(api $DL "len(d[\"joueurs\"])")" = 6 ] && [ "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d1$R\"][0]")" = "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d2$R\"][0]")" ]'
+# ---------- Points LiveRoums (LP) & boutique ----------
+pj(){ curl -s -b /tmp/mm_$1 $B/api/points | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
+LOSER=$(curl -s $B/api/parties/$G1 | python3 -c "import sys,json;print([p['pseudo'] for p in json.load(sys.stdin)['joueurs'] if p['equipe']==2][0])")
+ok "LP : victoire partie rapide → +100 (registre) + bonus 1re victoire x2" '[ "$(pj $HOST "sum(h[\"montant\"] for h in d[\"historique\"] if h[\"motif\"]==\"Victoire (partie rapide)\")")" = 100 ] && pj $HOST "d[\"historique\"]" | grep -q "première victoire du jour"'
+ok "LP : défaite → +10 de participation" '[ "$(pj $LOSER "sum(h[\"montant\"] for h in d[\"historique\"] if h[\"motif\"].startswith(\"Participation\"))")" = 10 ]'
+ok "LP : victoire classée créditée (+100)" '[ "$(js $RW "d[\"points\"]")" -ge 200 ]'
+ok "LP : match de tournoi crédité au vainqueur" '[ "$(js $W "d[\"points\"]")" -ge 100 ]'
+mk lp1$R; mk lp2$R
+ok "LP : bonus de connexion quotidien +25" '[ "$(pj lp1$R "d[\"solde\"]")" = 25 ] && pj lp1$R "d[\"historique\"]" | grep -q "Bonus de connexion quotidien"'
+ok "LP : bonus quotidien non cumulable le même jour" 'q lp1$R -o /dev/null $B/profil; [ "$(pj lp1$R "d[\"solde\"]")" = 25 ]'
+ok "LP : solde affiché dans l en-tête" 'q lp1$R $B/boutique | grep -q "💎 25 LP"'
+ok "Boutique : page /boutique avec raretés et Clutch King" 'curl -s $B/boutique | grep -q "Clutch King" && curl -s $B/boutique | grep -q "Légendaire"'
+ok "Boutique : achat refusé (points insuffisants)" 'q lp1$R -L -d item=banner_inferno $B/boutique/acheter | grep -q "Points insuffisants" && [ "$(pj lp1$R "d[\"solde\"]")" = 25 ] && [ "$(pj lp1$R "len(d[\"inventaire\"])")" = 0 ]'
+S0=$(pj $HOST 'd["solde"]')
+ok "Boutique : achat réussi (−200 LP, inventaire)" 'q $HOST -L -d item=color_cyan $B/boutique/acheter | grep -q "Achat réussi" && [ "$(pj $HOST "d[\"solde\"]")" = $((S0-200)) ] && pj $HOST "d[\"inventaire\"]" | grep -q color_cyan'
+ok "Boutique : double achat refusé" 'q $HOST -L -d item=color_cyan $B/boutique/acheter | grep -q "possèdes déjà"'
+ok "Boutique : équiper un objet non possédé refusé" 'q lp1$R -L -d item=color_cyan $B/boutique/equiper | grep -q "ne possèdes pas"'
+ok "Boutique : équiper → visible sur le profil public" 'q $HOST -L -d item=color_cyan $B/boutique/equiper | grep -q "équipé" && [ "$(pj $HOST "d[\"equipe\"].get(\"color\")")" = color_cyan ] && curl -s $B/joueurs/$HOST | grep -q "color:#00f0ff"'
+ok "Boutique : cosmétique visible dans la liste de la partie" 'curl -s $B/parties/$G1 | grep -q "color:#00f0ff"'
+ok "Boutique : déséquiper" 'q $HOST -L -d slot=color $B/boutique/desequiper | grep -q "déséquipé" && [ "$(pj $HOST "d[\"equipe\"].get(\"color\")")" = None ]'
+ok "Admin : octroi refusé aux non-admins" '[ "$(q lp2$R -o /dev/null -w %{http_code} -d "pseudo=lp2$R&amount=999" $B/admin/points)" = 403 ]'
+ok "Admin : octroie 5000 LP puis achat légendaire" 'curl -s -b $A2 -L -d "pseudo=lp2$R&amount=5000&reason=Test" $B/admin/points | grep -q "+5000 LP" && q lp2$R -L -d item=banner_inferno $B/boutique/acheter | grep -q "Achat réussi" && [ "$(pj lp2$R "d[\"solde\"]")" = 2025 ]'
+ok "LP : historique des points" 'q lp2$R $B/points | grep -q "Achat boutique : Inferno" && q lp2$R $B/points | grep -q "Défis"'
 echo "Résultat : $P réussis, $F échoués"

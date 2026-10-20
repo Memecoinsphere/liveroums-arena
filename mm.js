@@ -1,6 +1,7 @@
 // SR (Elo), rangs et matchmaking
 const crypto = require('crypto');
 const db = require('./db');
+const P = require('./points');
 const K = 32, START = 1000;
 const TIERS = [[0, 'Bronze', '#cd7f32'], [900, 'Argent', '#c0c8d8'], [1050, 'Or', '#ffd23f'], [1200, 'Platine', '#3fe0c5'],
   [1350, 'Diamant', '#5aa9ff'], [1500, 'Maître', '#c04bff'], [1700, 'Légende', '#ff3d6e']];
@@ -35,6 +36,7 @@ function tournamentResult(tid, winner, loser) {
     ? db.prepare('SELECT id FROM users WHERE pseudo=?').all(name).map(r => r.id)
     : db.prepare('SELECT captain_id id FROM teams WHERE tournament_id=? AND name=?').all(tid, name).map(r => r.id);
   applyResult(t.game, ids(winner), ids(loser));
+  P.recordMatch(ids(winner), ids(loser), 'tournoi'); // +LP (voir points.js)
 }
 const CHARS = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
 function newCode() {
@@ -116,6 +118,7 @@ function declareResult(lid, winnerTeam) {
     // Seules les parties classées modifient le SR (les parties rapides / privées n'ont aucun impact)
     const after = l.ranked ? applyResult(l.game, w, lo) : {};
     Object.entries(after).forEach(([id, sr]) => db.prepare('UPDATE lobby_players SET sr_after=? WHERE lobby_id=? AND user_id=?').run(sr, lid, +id));
+    P.recordMatch(w, lo, l.ranked ? 'classe' : l.is_private ? 'privee' : 'rapide'); // +LP pour toutes les parties
     db.prepare("UPDATE lobbies SET status='termine', winner_team=?, ended_at=CURRENT_TIMESTAMP WHERE id=?").run(+winnerTeam, lid);
     db.emit('game_result', { lobby_id: lid, winner_team: +winnerTeam });
     if (!l.is_private && !l.ranked) ps.forEach(p => db.prepare('INSERT OR IGNORE INTO queue(user_id,game,mode) VALUES(?,?,?)').run(p.user_id, l.game, l.mode));

@@ -8,6 +8,7 @@ const db = require('./db');
 const S = require('./services');
 const B = require('./bracket');
 const V = require('./views');
+const P = require('./points');
 const { esc, layout, card, status, GAMES, PLATFORMS } = V;
 
 const app = express();
@@ -19,6 +20,7 @@ app.use(session({ secret: process.env.SESSION_SECRET || crypto.randomBytes(32).t
 app.use((req, res, next) => {
   B.autoGenerate();
   req.user = req.session.uid ? db.prepare('SELECT id,pseudo,email,platform,game_id,is_admin FROM users WHERE id=?').get(req.session.uid) : null;
+  if (req.user) { const d = P.dailyLogin(req.user.id); if (d) req.session.flash = req.session.flash || { type: 'ok', msg: `🎁 Bonus de connexion : +${d.total} LP (série de ${d.streak} jour${d.streak > 1 ? 's' : ''}) !` }; req.user.points = P.balance(req.user.id); }
   res.page = (title, body) => { const f = req.session.flash; delete req.session.flash; res.send(layout(title, req.user, f, body)); };
   req.flash = (type, msg) => { req.session.flash = { type, msg }; };
   next();
@@ -29,6 +31,7 @@ const admin = (req, res, next) => req.user?.is_admin ? next() : res.status(403).
 const TQ = `SELECT t.*, (SELECT COUNT(*) FROM registrations r WHERE r.tournament_id=t.id) count FROM tournaments t`;
 const MMR = require('./routes-mm')(app, { auth, admin });
 require('./discord-oauth')(app, { auth });
+require('./routes-points')(app, { auth, admin });
 const M = require('./mm');
 const getT = id => db.prepare(TQ + ' WHERE t.id=?').get(id);
 
@@ -147,9 +150,10 @@ app.get('/profil', auth, (req, res) => {
   const regs = db.prepare(`SELECT t.id, tm.name team FROM registrations r JOIN tournaments t ON t.id=r.tournament_id LEFT JOIN teams tm ON tm.id=r.team_id WHERE r.user_id=? ORDER BY t.start_date`).all(req.user.id);
   const rows = regs.map(r => { const t = getT(r.id); const s = status(t); return `<tr><td><a href="/tournois/${t.id}">${esc(t.name)}</a></td><td>${esc(t.game)}</td><td>${r.team ? '👥 ' + esc(r.team) : 'Solo'}</td><td>${V.fmtDate(t.start_date)}</td><td><span class="badge ${s.key}">${s.label}</span></td>
     <td>${!t.bracket_generated ? `<form method="post" action="/tournois/${t.id}/desinscription" onsubmit="return confirm('Se désinscrire ?')"><button class="btn ghost sm">Se désinscrire</button></form>` : '—'}</td></tr>`; }).join('');
-  res.page('Mon profil', `<section><div class="profile">${(() => { const d = db.prepare('SELECT discord_avatar FROM users WHERE id=?').get(req.user.id); return d.discord_avatar ? `<img class="avatar" src="${esc(d.discord_avatar)}" alt="Avatar Discord" style="object-fit:cover">` : `<div class="avatar">${esc(req.user.pseudo[0].toUpperCase())}</div>`; })()}<div><h1>${esc(req.user.pseudo)} ${req.user.is_admin ? '<span class="badge ex">Admin</span>' : ''}</h1>
+  res.page('Mon profil', `<section>${P.bannerHtml(req.user.id)}<div class="profile">${P.avatarHtml(req.user.id, req.user.pseudo, db.prepare('SELECT discord_avatar FROM users WHERE id=?').get(req.user.id).discord_avatar)}<div>${P.h1Html(req.user.id, req.user.pseudo, req.user.is_admin ? '<span class="badge ex">Admin</span>' : '')}
   <p class="muted">${esc(req.user.email)} · ${esc(req.user.platform)} · ID de jeu : ${esc(req.user.game_id || '—')}</p></div></div>
   <p><a href="/joueurs/${encodeURIComponent(req.user.pseudo)}">Voir mon profil public →</a></p>
+  <h2>💎 Points LiveRoums</h2><div class="lp-stats"><div class="lp-wallet">💎 <b>${P.balance(req.user.id)}</b> LP</div>${P.levelHtml(req.user.id)}<div class="inline"><a class="btn sm" href="/boutique">🛒 Boutique</a><a class="btn ghost sm" href="/points">Historique & défis</a>${req.user.is_admin ? '<a class="btn ghost sm" href="/admin/points">Octroyer des LP</a>' : ''}</div></div>
   <h2>Skill rating</h2><div class="sr-grid">${MMR.srTable(req.user.id)}</div>
   <h2>🔗 Comptes liés</h2>${MMR.linkedList(req.user.id)}
   <div class="link-forms panel"><div class="inline">${(() => { const u = db.prepare('SELECT discord_username, discord_global_name, discord_avatar FROM users WHERE id=?').get(req.user.id); const d = u.discord_username;

@@ -3,6 +3,7 @@ const db = require('./db');
 const M = require('./mm');
 const R = require('./ranked');
 const { esc, GAMES } = require('./views');
+const P = require('./points');
 
 const rank = (sr, withSr = true) => { const t = M.tier(sr); return `<span class="rank" style="--rc:${t.color}" title="${t.name} · ${sr} SR">◆ ${t.name}${withSr ? ` <b>${sr}</b>` : ''}</span>`; };
 const PROVIDERS = { discord: ['Discord', '💬'], steam: ['Steam', '🟦'], psn: ['PlayStation Network', '🎮'], xbox: ['Xbox Live', '🟩'], epic: ['Epic Games', '⬛'],
@@ -26,12 +27,12 @@ module.exports = (app, { auth, admin }) => {
   // ---------- Classement ----------
   app.get('/classement', (req, res) => {
     const game = GAMES[req.query.jeu] ? req.query.jeu : 'Valorant';
-    const rows = db.prepare(`SELECT u.pseudo, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? AND r.wins + r.losses > 0 ORDER BY r.sr DESC LIMIT 100`).all(game);
+    const rows = db.prepare(`SELECT u.pseudo, u.id uid, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? AND r.wins + r.losses > 0 ORDER BY r.sr DESC LIMIT 100`).all(game);
     res.page('Classement', `<section><h1>🏅 Classement SR <span class="badge classe">Classé</span></h1>
     <div class="tabs">${Object.keys(GAMES).map(g => `<a class="${g === game ? 'active' : ''}" href="/classement?jeu=${encodeURIComponent(g)}">${GAMES[g].icon} ${esc(g)}</a>`).join('')}</div>
     <div class="tiers">${M.TIERS.map(([min, n, c]) => `<span class="rank" style="--rc:${c}">◆ ${n} <small>${min}+</small></span>`).join('')}</div>
     <div class="table-wrap"><table class="lb"><tr><th>#</th><th>Joueur</th><th>Rang</th><th>SR</th><th>V / D</th><th>% victoires</th></tr>
-    ${rows.map((r, i) => `<tr class="${i < 3 ? 'top' + (i + 1) : ''}"><td class="pos">${i + 1}</td><td><a href="/joueurs/${encodeURIComponent(r.pseudo)}">${esc(r.pseudo)}</a></td><td>${rank(r.sr, false)}</td><td><b>${r.sr}</b></td><td>${r.wins} / ${r.losses}</td><td>${r.wins + r.losses ? Math.round(r.wins / (r.wins + r.losses) * 100) : 0}%</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucun joueur classé.</td></tr>'}
+    ${rows.map((r, i) => `<tr class="${i < 3 ? 'top' + (i + 1) : ''}"><td class="pos">${i + 1}</td><td>${P.nameHtml(r.uid, r.pseudo)}</td><td>${rank(r.sr, false)}</td><td><b>${r.sr}</b></td><td>${r.wins} / ${r.losses}</td><td>${r.wins + r.losses ? Math.round(r.wins / (r.wins + r.losses) * 100) : 0}%</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucun joueur classé.</td></tr>'}
     </table></div><p class="muted sm">SR classé : seules les parties classées (et les matchs de tournoi) font évoluer le SR. SR de départ : ${M.START}. Système Elo (K=${32}) mis à jour après chaque match de tournoi et de matchmaking.</p></section>`);
   });
 
@@ -40,14 +41,15 @@ module.exports = (app, { auth, admin }) => {
     const u = db.prepare('SELECT id,pseudo,platform,game_id,created_at FROM users WHERE pseudo=?').get(req.params.pseudo);
     if (!u) return res.status(404).page('Introuvable', '<h1>Joueur introuvable</h1>');
     const ts = db.prepare('SELECT t.id,t.name FROM registrations r JOIN tournaments t ON t.id=r.tournament_id WHERE r.user_id=?').all(u.id);
-    res.page(u.pseudo, `<section><div class="profile"><div class="avatar">${esc(u.pseudo[0].toUpperCase())}</div><div><h1>${esc(u.pseudo)}</h1>
+    const L = P.level(P.state(u.id).xp);
+    res.page(u.pseudo, `<section>${P.bannerHtml(u.id)}<div class="profile">${P.avatarHtml(u.id, u.pseudo)}<div>${P.h1Html(u.id, u.pseudo, `<span class="badge lvl">Niv. ${L.lv}</span>`)}
     <p class="muted">${esc(u.platform)} · membre depuis ${new Date(u.created_at).toLocaleDateString('fr-FR')}</p></div></div>
-    <h2>Skill rating</h2><div class="sr-grid">${srTable(u.id)}</div><h2>Comptes liés</h2>${linkedList(u.id)}
+    ${P.levelHtml(u.id)}<h2>Skill rating</h2><div class="sr-grid">${srTable(u.id)}</div><h2>Comptes liés</h2>${linkedList(u.id)}
     <h2>Tournois</h2>${ts.length ? `<ul>${ts.map(t => `<li><a href="/tournois/${t.id}">${esc(t.name)}</a></li>`).join('')}</ul>` : '<p class="muted">Aucun.</p>'}</section>`);
   });
   app.get('/api/joueurs/:pseudo', (req, res) => {
     const u = db.prepare('SELECT id,pseudo FROM users WHERE pseudo=?').get(req.params.pseudo); if (!u) return res.status(404).json({});
-    res.json({ pseudo: u.pseudo, ratings: Object.fromEntries(db.prepare('SELECT game,sr FROM ratings WHERE user_id=?').all(u.id).map(r => [r.game, r.sr])),
+    res.json({ pseudo: u.pseudo, points: P.balance(u.id), niveau: P.level(P.state(u.id).xp).lv, ratings: Object.fromEntries(db.prepare('SELECT game,sr FROM ratings WHERE user_id=?').all(u.id).map(r => [r.game, r.sr])),
       lobby: M.activeLobby(u.id)?.code || null, ranked_queue: R.inQueue(u.id)?.game || null, queue: db.prepare('SELECT game,mode FROM queue WHERE user_id=?').get(u.id) || null });
   });
 
@@ -190,7 +192,7 @@ module.exports = (app, { auth, admin }) => {
     const inLobby = req.user && ps.some(p => p.user_id === req.user.id);
     const ST = { attente: ['ouvert', 'En attente de joueurs'], en_cours: ['en_cours', 'En cours'], termine: ['termine', 'Terminée'] }[l.status];
     const pl = p => { const sr = p.sr_before ?? M.getSR(p.user_id, l.game); const d = p.sr_after != null ? p.sr_after - p.sr_before : null;
-      return `<li><a href="/joueurs/${encodeURIComponent(p.pseudo)}">${esc(p.pseudo)}</a>${p.user_id === l.host_id ? ' <small class="muted">👑 hôte</small>' : ''} ${rank(p.sr_after ?? sr)}${d != null ? ` <span class="delta ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${d}</span>` : ''}</li>`; };
+      return `<li>${P.nameHtml(p.user_id, p.pseudo)}${p.user_id === l.host_id ? ' <small class="muted">👑 hôte</small>' : ''} ${rank(p.sr_after ?? sr)}${d != null ? ` <span class="delta ${d >= 0 ? 'up' : 'down'}">${d >= 0 ? '+' : ''}${d}</span>` : ''}</li>`; };
     const avg = t => { const x = ps.filter(p => p.team === t); return x.length ? Math.round(x.reduce((a, p) => a + (p.sr_before ?? 0), 0) / x.length) : 0; };
     const team = t => `<div class="team-box ${l.winner_team === t ? 'win' : l.winner_team ? 'lose' : ''}"><h3>Équipe ${t === 1 ? 'Alpha' : 'Bravo'} ${l.winner_team === t ? '🏆' : ''}</h3><p class="muted sm">SR moyen ${avg(t)}</p><ul>${ps.filter(p => p.team === t).map(pl).join('') || '<li class="muted">—</li>'}</ul>
       ${isHost && l.status === 'en_cours' ? `<form method="post" action="/parties/${l.code}/resultat"><input type="hidden" name="winner" value="${t}"><button class="btn sm">Victoire Équipe ${t === 1 ? 'Alpha' : 'Bravo'}</button></form>` : ''}</div>`;
@@ -214,7 +216,7 @@ module.exports = (app, { auth, admin }) => {
   app.post('/parties/:code/resultat', auth, (req, res) => {
     const l = db.prepare('SELECT * FROM lobbies WHERE code=?').get(req.params.code);
     if (!l || !(l.host_id === req.user.id || req.user.is_admin)) { req.flash('err', "Seul l'hôte ou un admin peut déclarer le résultat."); return res.redirect(303, `/parties/${req.params.code}`); }
-    try { const next = M.declareResult(l.id, +req.body.winner); req.flash('ok', `Résultat enregistré, SR mis à jour.${next.length ? ` ${next.length} nouvelle(s) partie(s) lancée(s) depuis la file.` : ''}`); }
+    try { const next = M.declareResult(l.id, +req.body.winner); req.flash('ok', `Résultat enregistré, SR mis à jour, LP distribués (+${P.PTS.WIN} par victoire).${next.length ? ` ${next.length} nouvelle(s) partie(s) lancée(s) depuis la file.` : ''}`); }
     catch (e) { req.flash('err', e.message); }
     res.redirect(303, `/parties/${l.code}`);
   });
