@@ -68,7 +68,7 @@ module.exports = (app, { auth }) => {
         const pseudo = uniquePseudo(me.username || me.global_name);
         const hash = require('bcrypt').hashSync(crypto.randomBytes(32).toString('hex'), 10); // mot de passe inutilisable
         uid = db.transaction(() => {
-          const id = db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id) VALUES(?,?,?,?,?)').run(pseudo, `discord-${me.id}@discord.local`, hash, 'PC', '').lastInsertRowid;
+          const id = db.prepare("INSERT INTO users(pseudo,email,password_hash,platform,game_id,email_verified,verified_at) VALUES(?,?,?,?,?,1,CURRENT_TIMESTAMP)").run(pseudo, `discord-${me.id}@discord.local`, hash, 'PC', '') /* connexion Discord = preuve suffisante */.lastInsertRowid;
           saveDiscord(id, me); return id;
         })();
         msg = `Bienvenue ${pseudo} ! Compte créé avec Discord.`;

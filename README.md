@@ -49,3 +49,16 @@ Le site est **100 % Call of Duty** : un seul jeu (tournois, classé 4v4 solo/qua
 - Mises à jour en direct par polling toutes les 3 s (`/api/matchmaking`, `/api/parties/<code>`), redirection automatique vers la partie trouvée.
 
 Captures : `python3 screenshots-sr.py`.
+
+## Vérification de l'email
+
+Les comptes créés par email / mot de passe sont **inactifs** jusqu'au clic sur le lien reçu par mail (jeton aléatoire de 32 octets à usage unique, seul son hachage SHA-256 est stocké, valable 24 h, envoyé vers `PUBLIC_URL/verifier-email?token=…`). Un compte non vérifié ne peut pas se connecter ni agir ; la page de connexion propose « Renvoyer le mail » (limité, réponse identique que le compte existe ou non). Les comptes existants avant cette fonctionnalité, l'admin et les comptes créés via Discord sont considérés comme vérifiés.
+
+| Variable | Rôle |
+|---|---|
+| `PUBLIC_URL` | Adresse publique du site, utilisée dans le lien (obligatoire en production) |
+| `RESEND_API_KEY` | Envoi via l'API Resend (prioritaire si défini) |
+| `SMTP_URL` | Sinon, envoi SMTP via nodemailer (`smtps://user:pass@smtp.exemple.com:465`) |
+| `MAIL_FROM` | Expéditeur (`LiveRoums Arena <no-reply@ton-domaine>`) ; le domaine doit être validé chez le fournisseur |
+
+Sans fournisseur configuré, aucun mail n'est envoyé : un avertissement et le lien apparaissent **uniquement dans les journaux du serveur**, et l'admin peut valider un compte à la main depuis `/admin/verifications`. En test (`NODE_ENV=test`), les mails sont écrits dans `DB_FILE.outbox.jsonl` (ou `MAIL_OUTBOX`).

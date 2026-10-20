@@ -14,6 +14,10 @@ curl(){
     command curl -H "X-Forwarded-For: $ip" -H "X-CSRF-Token: $tok" "$@"
   else command curl -H "X-Forwarded-For: $ip" "$@"; fi
 }
+# Vérification d'email : lien lu dans la boîte d'envoi de test (NODE_ENV=test), ouvert avec le bocal de cookies donné
+OUTBOX=${OUTBOX:-/tmp/lp-test.db.outbox.jsonl}
+vlink(){ python3 -c "import sys,json,re;L=[json.loads(l) for l in open(sys.argv[1]) if l.strip()];m=[x for x in L if x['to']==sys.argv[2].lower()];print(re.search(r'/verifier-email\?token=[A-Za-z0-9_-]+',m[-1]['text']).group(0) if m else '')" "$OUTBOX" "$1" 2>/dev/null; }
+vfy(){ local L=$(vlink "$1"); [ -n "$L" ] && curl -s -c "$2" -b "$2" -o /dev/null "$B$L"; }
 ok(){ if eval "$2"; then echo "✅ $1"; P=$((P+1)); else echo "❌ $1"; F=$((F+1)); fi; }
 U=testeur$RANDOM
 c(){ curl -s -b $J -c $J "$@"; }
@@ -31,10 +35,19 @@ TC=$(mkT "CoD Open $RANDOM" "game=Call+of+Duty&platform=PC&format=solo&max_slots
 TX=$(mkT "CoD Clos $RANDOM" "game=Call+of+Duty&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '-1 day')")
 ok "Admin crée les tournois de test" '[ -n "$TE" ] && [ -n "$TR" ] && [ -n "$TF" ] && [ -n "$TC" ] && [ -n "$TX" ]'
 # 4 joueurs inscrits au CoD Open puis bracket généré par l'admin
-for i in 1 2 3 4; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=c$i$U&email=c$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TC/inscription; done
+for i in 1 2 3 4; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=c$i$U&email=c$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; vfy c$i$U@t.gg $K; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TC/inscription; done
 curl -s -c $A -b $A -o /dev/null -d x=1 $B/admin/tournois/$TC/bracket
 ok "Accueil 200" '[ "$(curl -s -o /dev/null -w %{http_code} $B/)" = 200 ]'
-ok "Création de compte → /profil" '[ "$(c -o /dev/null -w %{redirect_url} -d "pseudo=$U&email=$U@test.gg&password=MotDePasse1&platform=PC&game_id=$U%231" $B/inscription)" = "$B/profil" ]'
+ok "Création de compte → compte inactif, renvoi vers /connexion" '[ "$(c -o /dev/null -w %{redirect_url} -d "pseudo=$U&email=$U@test.gg&password=MotDePasse1&platform=PC&game_id=$U%231" $B/inscription)" = "$B/connexion?verif=1" ] && [ "$(c -o /dev/null -w %{http_code} $B/profil)" = 303 ]'
+ok "Vérif email : mail envoyé (HTML néon + texte) avec lien à usage unique" 'python3 -c "import json;m=[json.loads(l) for l in open(\"$OUTBOX\")][-1];assert m[\"to\"]==\"$U@test.gg\".lower() and \"Vérifier mon email\" in m[\"html\"] and \"/verifier-email?token=\" in m[\"text\"]"'
+ok "Vérif email : connexion refusée tant que non vérifié (message + formulaire de renvoi)" 'P0=$(c -L -d "login=$U@test.gg&password=MotDePasse1" $B/connexion); echo "$P0" | grep -q "pas encore vérifié" && echo "$P0" | grep -q "Renvoyer le mail" && [ "$(c -o /dev/null -w %{http_code} $B/profil)" = 303 ]'
+ok "Vérif email : jeton invalide refusé" 'c "$B/verifier-email?token=AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA" | grep -q "Lien invalide ou expiré" && c "$B/verifier-email?token=x" | grep -q "Lien invalide"'
+OLDL=$(vlink $U@test.gg)
+ok "Vérif email : renvoi → nouveau lien, l ancien est invalidé" 'sleep 0; sqlite3 /tmp/lp-test.db "UPDATE email_tokens SET created_at=created_at-120000" 2>/dev/null || node -e "const D=require(\"better-sqlite3\");new D(\"/tmp/lp-test.db\").prepare(\"UPDATE email_tokens SET created_at=created_at-120000\").run()"; c -L -d "email=$U@test.gg" $B/renvoyer-verification | grep -q "Si un compte non vérifié" && [ "$(vlink $U@test.gg)" != "$OLDL" ] && c "$B$OLDL" | grep -q "Lien invalide"'
+ok "Vérif email : renvoi pour un email inconnu → même message (pas d énumération)" 'c -L -d "email=inconnu$U@test.gg" $B/renvoyer-verification | grep -q "Si un compte non vérifié"'
+NEWL=$(vlink $U@test.gg)
+ok "Vérif email : le lien vérifie le compte et connecte (/profil)" '[ "$(c -o /dev/null -w %{redirect_url} "$B$NEWL")" = "$B/profil" ] && c $B/profil | grep -q "$U"'
+ok "Vérif email : lien déjà utilisé refusé" 'c "$B$NEWL" | grep -q "Lien invalide ou expiré"'
 ok "Profil affiche le pseudo" 'c $B/profil | grep -q "$U"'
 ok "Compte en double refusé" 'c -L -d "pseudo=$U&email=$U@test.gg&password=MotDePasse1&platform=PC" $B/inscription | grep -q "déjà utilisé"'
 c -X POST $B/deconnexion -o /dev/null
@@ -47,8 +60,8 @@ ok "Équipe incomplète refusée (CoD Duo)" 'c -L -d "rules=on&team_name=X$U" $B
 ok "Inscription refusée sur tournoi clos" 'c -L -d rules=on $B/tournois/$TX/inscription | grep -q "fermées"'
 ok "Profil liste 2 tournois" 'c $B/profil | grep -q "Mes tournois (2)"'
 # Remplir CoD League (8 places) avec d'autres comptes, puis vérifier le refus
-for i in 1 2 3 4 5 6 7; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=f$i$U&email=f$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TF/inscription; done
-K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=x$U&email=x$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription
+for i in 1 2 3 4 5 6 7; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=f$i$U&email=f$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; vfy f$i$U@t.gg $K; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TF/inscription; done
+K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=x$U&email=x$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; vfy x$U@t.gg $K
 ok "Capacité : 9e joueur refusé (complet)" 'curl -s -c $K -b $K -L -d rules=on $B/tournois/$TF/inscription | grep -q "complet"'
 ok "Désinscription CoD League" 'c -L -d x=1 $B/tournois/$TF/desinscription | grep -q "désinscrit"'
 ok "Profil liste 1 tournoi" 'c $B/profil | grep -q "Mes tournois (1)"'
@@ -61,7 +74,7 @@ ok "Filtre format=solo&statut=en_cours" 'curl -s "$B/tournois?format=solo&statut
 
 # ---------- SR, comptes liés, matchmaking ----------
 js(){ curl -s "$B/api/joueurs/$1" | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
-mk(){ local j=/tmp/mm_$1; rm -f $j; curl -s -c $j -b $j -o /dev/null -d "pseudo=$1&email=$1@t.gg&password=MotDePasse1&platform=PC" $B/inscription; }
+mk(){ local j=/tmp/mm_$1; rm -f $j; curl -s -c $j -b $j -o /dev/null -d "pseudo=$1&email=$1@t.gg&password=MotDePasse1&platform=PC" $B/inscription; vfy $1@t.gg $j; }
 R=$RANDOM; for n in 1 2 3 4 5; do mk q$n$R; done
 q(){ curl -s -c /tmp/mm_$1 -b /tmp/mm_$1 "${@:2}"; }
 ok "Classement vide au départ (état vide)" 'curl -s "$B/classement" | grep -q "Aucun joueur classé"'
@@ -256,4 +269,17 @@ ok "Export API : désactivée (404) sans ANTICHEAT_EXPORT_TOKEN" '[ "$(command c
 ok "Anti-triche : lien 🛡️ admin seulement (nav + profil), absent pour un joueur et déconnecté" 'curl -s -b $A2 $B/profil | grep -c "href=\"/admin/anti-triche\"" | grep -q 2 && ! q sec2$R $B/profil | grep -q "/admin/anti-triche" && ! command curl -s $B/ | grep -q "/admin/anti-triche"'
 ok "Anti-triche : joueur → 403, déconnecté → redirection /connexion" '[ "$(q sec2$R -o /dev/null -w %{http_code} $B/admin/anti-triche)" = 403 ] && [ "$(command curl -s -o /dev/null -w %{http_code} $B/admin/anti-triche)" = 303 ] && command curl -s -o /dev/null -w %{redirect_url} $B/admin/anti-triche | grep -q "/connexion"'
 ok "Anti-triche : CSP frame-src autorise uniquement l agent, frame-ancestors du site inchangé" 'command curl -s -D - -o /dev/null $B/ | grep -i "^content-security-policy" | grep -q "frame-src .self. https://liveroums-anticheat.onrender.com;.*frame-ancestors .none."'
+# Vérification d'email : expiration, renvoi limité, validation admin, blocage au niveau session
+SQL(){ node -e "const D=require(\"better-sqlite3\");const d=new D(\"/tmp/lp-test.db\");d.pragma(\"busy_timeout = 3000\");console.log(JSON.stringify(d.prepare(process.argv[1]).run()))" "$1" >/dev/null; }
+EV=/tmp/ev$R; rm -f $EV; curl -s -c $EV -b $EV -o /dev/null -d "pseudo=ev$R&email=ev$R@t.gg&password=MotDePasse1&platform=PC" $B/inscription
+ELK=$(vlink ev$R@t.gg); SQL "UPDATE email_tokens SET expires_at=1 WHERE user_id=(SELECT id FROM users WHERE pseudo='ev$R')"
+ok "Vérif email : lien expiré (24 h) refusé, compte toujours inactif" 'curl -s -c $EV -b $EV "$B$ELK" | grep -q "Lien invalide ou expiré" && curl -s -c $EV -b $EV -L -d "login=ev$R&password=MotDePasse1" $B/connexion | grep -q "pas encore vérifié"'
+ok "Vérif email : non vérifié → actions bloquées (file, roue, boutique, tournoi)" '[ "$(curl -s -b $EV -o /dev/null -w %{http_code} -d "gm=Call of Duty|1v1" $B/matchmaking/rejoindre)" = 303 ] && [ "$(curl -s -b $EV -o /dev/null -w %{redirect_url} -d x=1 $B/roue/tourner | grep -c connexion)" = 1 ] && [ "$(curl -s -b $EV -o /dev/null -w %{redirect_url} -d item=badge_gg $B/boutique/acheter | grep -c connexion)" = 1 ] && [ "$(curl -s -b $EV -o /dev/null -w %{redirect_url} -d rules=on $B/tournois/$TC/inscription | grep -c connexion)" = 1 ]'
+ok "Vérif email : renvoi limité (1 mail/min par compte, 5 demandes/15 min par IP → 429)" 'N0=$(grep -c "ev$R@t.gg" $OUTBOX); RL=/tmp/rv$R; for i in 1 2 3 4 5 6; do C=$(curl -s -c $RL -b $RL -o /dev/null -w %{http_code} -d "email=ev$R@t.gg" $B/renvoyer-verification); done; [ "$C" = 429 ] && [ "$(grep -c "ev$R@t.gg" $OUTBOX)" = $((N0+1)) ]'
+ok "Vérif email : renvoi sans jeton CSRF refusé (403)" '[ "$(command curl -s -o /dev/null -w %{http_code} -d "email=ev$R@t.gg" $B/renvoyer-verification)" = 403 ]'
+ok "Vérif email : admin valide manuellement le compte, qui peut alors se connecter" 'EID=$(curl -s -b $A2 $B/admin/verifications | grep -o "/admin/utilisateurs/[0-9]*/verifier" | head -1); curl -s -b $A2 $B/admin/verifications | grep -q "ev$R" && curl -s -b $A2 -o /dev/null -d x=1 "$B$(curl -s -b $A2 $B/admin/verifications | grep -B3 "ev$R" | grep -o "/admin/utilisateurs/[0-9]*/verifier" | head -1)" && [ "$(curl -s -c $EV -b $EV -o /dev/null -w %{redirect_url} -d "login=ev$R&password=MotDePasse1" $B/connexion)" = "$B/profil" ]'
+ok "Vérif email : page admin des vérifications refusée aux joueurs" '[ "$(q sec2$R -o /dev/null -w %{http_code} $B/admin/verifications)" = 403 ] && [ "$(q sec2$R -o /dev/null -w %{http_code} -d x=1 $B/admin/utilisateurs/1/verifier)" = 403 ]'
+SQL "UPDATE users SET email_verified=0 WHERE pseudo='ev$R'"
+ok "Vérif email : session existante coupée si le compte n est plus vérifié" '[ "$(curl -s -c $EV -b $EV -o /dev/null -w %{http_code} $B/profil)" = 303 ]'
+ok "Vérif email : compte admin existant toujours connectable" '[ "$(command curl -s -o /dev/null -w %{redirect_url} -c /tmp/adm$R -b /tmp/adm$R -H "X-CSRF-Token: $(command curl -s -c /tmp/adm$R -b /tmp/adm$R $B/api/csrf | sed "s/.*\"csrf\":\"\([0-9a-f]*\)\".*/\1/")" -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion)" = "$B/profil" ]'
 echo "Résultat : $P réussis, $F échoués"
