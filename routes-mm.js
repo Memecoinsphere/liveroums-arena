@@ -1,6 +1,7 @@
 // Routes : classement, profils publics, comptes liés (Steam OpenID), matchmaking & parties
 const db = require('./db');
 const M = require('./mm');
+const R = require('./ranked');
 const { esc, GAMES } = require('./views');
 
 const rank = (sr, withSr = true) => { const t = M.tier(sr); return `<span class="rank" style="--rc:${t.color}" title="${t.name} · ${sr} SR">◆ ${t.name}${withSr ? ` <b>${sr}</b>` : ''}</span>`; };
@@ -26,12 +27,12 @@ module.exports = (app, { auth, admin }) => {
   app.get('/classement', (req, res) => {
     const game = GAMES[req.query.jeu] ? req.query.jeu : 'Valorant';
     const rows = db.prepare(`SELECT u.pseudo, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? AND r.wins + r.losses > 0 ORDER BY r.sr DESC LIMIT 100`).all(game);
-    res.page('Classement', `<section><h1>🏅 Classement SR</h1>
+    res.page('Classement', `<section><h1>🏅 Classement SR <span class="badge classe">Classé</span></h1>
     <div class="tabs">${Object.keys(GAMES).map(g => `<a class="${g === game ? 'active' : ''}" href="/classement?jeu=${encodeURIComponent(g)}">${GAMES[g].icon} ${esc(g)}</a>`).join('')}</div>
     <div class="tiers">${M.TIERS.map(([min, n, c]) => `<span class="rank" style="--rc:${c}">◆ ${n} <small>${min}+</small></span>`).join('')}</div>
     <div class="table-wrap"><table class="lb"><tr><th>#</th><th>Joueur</th><th>Rang</th><th>SR</th><th>V / D</th><th>% victoires</th></tr>
     ${rows.map((r, i) => `<tr class="${i < 3 ? 'top' + (i + 1) : ''}"><td class="pos">${i + 1}</td><td><a href="/joueurs/${encodeURIComponent(r.pseudo)}">${esc(r.pseudo)}</a></td><td>${rank(r.sr, false)}</td><td><b>${r.sr}</b></td><td>${r.wins} / ${r.losses}</td><td>${r.wins + r.losses ? Math.round(r.wins / (r.wins + r.losses) * 100) : 0}%</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucun joueur classé.</td></tr>'}
-    </table></div><p class="muted sm">SR de départ : ${M.START}. Système Elo (K=${32}) mis à jour après chaque match de tournoi et de matchmaking.</p></section>`);
+    </table></div><p class="muted sm">SR classé : seules les parties classées (et les matchs de tournoi) font évoluer le SR. SR de départ : ${M.START}. Système Elo (K=${32}) mis à jour après chaque match de tournoi et de matchmaking.</p></section>`);
   });
 
   // ---------- Profil public ----------
@@ -47,7 +48,7 @@ module.exports = (app, { auth, admin }) => {
   app.get('/api/joueurs/:pseudo', (req, res) => {
     const u = db.prepare('SELECT id,pseudo FROM users WHERE pseudo=?').get(req.params.pseudo); if (!u) return res.status(404).json({});
     res.json({ pseudo: u.pseudo, ratings: Object.fromEntries(db.prepare('SELECT game,sr FROM ratings WHERE user_id=?').all(u.id).map(r => [r.game, r.sr])),
-      lobby: M.activeLobby(u.id)?.code || null, queue: db.prepare('SELECT game,mode FROM queue WHERE user_id=?').get(u.id) || null });
+      lobby: M.activeLobby(u.id)?.code || null, ranked_queue: R.inQueue(u.id)?.game || null, queue: db.prepare('SELECT game,mode FROM queue WHERE user_id=?').get(u.id) || null });
   });
 
   // ---------- Comptes liés ----------
@@ -88,11 +89,15 @@ module.exports = (app, { auth, admin }) => {
   // ---------- Matchmaking ----------
   const modeOpts = () => Object.entries(M.MODES).map(([g, ms]) => `<optgroup label="${esc(g)}">${ms.map(m => `<option value="${esc(g)}|${m}">${esc(g)} — ${m}</option>`).join('')}</optgroup>`).join('');
   const queueState = uid => {
+    R.tryAll();
+    const rcounts = db.prepare('SELECT game,COUNT(*) n FROM ranked_queue GROUP BY game').all();
+    const rq = uid ? R.inQueue(uid) : null, duo = uid ? R.myDuo(uid) : null, inv = uid ? R.invites(uid) : [];
+    const rv = [rcounts, rq && rq.game, duo && [duo.id, duo.mate_id, duo.invited_id], inv.map(i => i.id)];
     const counts = db.prepare('SELECT game,mode,COUNT(*) n FROM queue GROUP BY game,mode').all();
     const mine = uid ? db.prepare('SELECT * FROM queue WHERE user_id=?').get(uid) : null;
     const lobby = uid ? M.activeLobby(uid) : null;
     const live = db.prepare("SELECT COUNT(*) c FROM lobbies WHERE status='en_cours'").get().c;
-    return { counts, mine, lobby, live, v: JSON.stringify([counts, mine && mine.game + mine.mode, lobby?.code, live]) };
+    return { counts, mine, lobby, live, rcounts, rq, duo, inv, v: JSON.stringify([counts, mine && mine.game + mine.mode, lobby?.code, live, rv]) };
   };
   app.get('/api/matchmaking', (req, res) => { const s = queueState(req.user?.id); res.json({ v: s.v, partie: s.lobby && s.lobby.status === 'en_cours' ? `/parties/${s.lobby.code}` : null }); });
   app.get('/matchmaking', (req, res) => {
@@ -100,15 +105,43 @@ module.exports = (app, { auth, admin }) => {
     const cnt = (g, m) => s.counts.find(c => c.game === g && c.mode === m)?.n || 0;
     const cards = Object.entries(M.MODES).flatMap(([g, ms]) => ms.map(m => {
       const n = cnt(g, m), need = 2 * M.teamSize(m), me = s.mine && s.mine.game === g && s.mine.mode === m;
-      return `<div class="queue-card ${me ? 'me' : ''}" style="--gc:${GAMES[g].color}"><div class="qc-head"><span class="gicon">${GAMES[g].icon}</span><div><b>${esc(g)}</b><span class="mode">${m}</span></div></div>
+      return `<div class="queue-card ${me ? 'me' : ''}" style="--gc:${GAMES[g].color}"><div class="qc-head"><span class="gicon">${GAMES[g].icon}</span><div><b>${esc(g)}</b><span class="mode">${m}</span></div><span class="badge rapide">Rapide</span></div>
       <div class="bar"><i style="width:${Math.min(100, n / need * 100)}%"></i></div><p class="muted sm">${n} / ${need} joueurs en attente${req.user ? ` · ton SR : ${rank(M.getSR(req.user.id, g))}` : ''}</p>
       ${req.user ? (me ? `<form method="post" action="/matchmaking/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche en cours…</span>`
         : `<form method="post" action="/matchmaking/rejoindre"><input type="hidden" name="gm" value="${esc(g)}|${m}"><button class="btn sm" ${s.lobby ? 'disabled' : ''}>Rejoindre la file</button></form>`) : ''}</div>`;
     })).join('');
+    const u = req.user, d = s.duo;
+    const pseudoOf = id => id ? db.prepare('SELECT pseudo FROM users WHERE id=?').get(id)?.pseudo : null;
+    const rcards = Object.keys(R.FORMAT).map(g => {
+      const n = s.rcounts.find(c => c.game === g)?.n || 0, need = 2 * R.FORMAT[g], me = s.rq && s.rq.game === g;
+      const myDuoHere = d && d.game === g, ready = myDuoHere && d.mate_id;
+      let act = '';
+      if (u) {
+        if (me) act = `<form method="post" action="/classe/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche ${s.rq.duo_id ? 'en duo' : 'solo'}… (écart ±${R.spread(Date.now() - new Date(s.rq.joined_at.replace(' ', 'T') + 'Z'))} SR)</span>`;
+        else if (s.lobby || s.rq) act = '';
+        else if (d && !myDuoHere) act = `<p class="muted sm">Ton duo est prévu pour ${esc(d.game)}.</p>`;
+        else if (ready) act = d.leader_id === u.id ? `<form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👥 Rechercher en duo</button></form>` : '<p class="muted sm">Le créateur du duo lance la recherche.</p>';
+        else if (myDuoHere) act = '<p class="muted sm">⏳ En attente de ton coéquipier…</p>';
+        else act = `<div class="rk-acts"><form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👤 Solo</button></form>
+          ${R.duoAllowed(g) ? `<form method="post" action="/classe/duo"><input type="hidden" name="game" value="${esc(g)}"><button class="btn ghost sm">👥 Créer un duo</button></form>` : ''}</div>`;
+      }
+      return `<div class="queue-card ranked-card ${me ? 'me' : ''}" style="--gc:${GAMES[g].color}"><div class="qc-head"><span class="gicon">${GAMES[g].icon}</span><div><b>${esc(g)}</b><span class="mode">${R.fmt(g)}</span></div><span class="badge classe">Classé</span></div>
+      <div class="bar"><i style="width:${Math.min(100, n / need * 100)}%"></i></div><p class="muted sm">${n} / ${need} joueurs en file${u ? ` · ton SR : ${rank(M.getSR(u.id, g))}` : ''}</p>
+      <p class="sm ${R.duoAllowed(g) ? 'muted' : 'warn-txt'}">${R.duoAllowed(g) ? 'Solo ou duo (2 max)' : `🚫 Duo non autorisé (${R.fmt(g)}) : solo uniquement`}</p>${act}</div>`;
+    }).join('');
+    const duoPanel = !u ? '' : d ? `<h3>👥 Mon duo · ${esc(d.game)}</h3><p>Code duo : <b class="code">${d.code}</b></p>
+      <ul class="entrants"><li>👑 ${esc(pseudoOf(d.leader_id))}</li><li>${d.mate_id ? esc(pseudoOf(d.mate_id)) : `<span class="muted">${d.invited_id ? `Invitation envoyée à ${esc(pseudoOf(d.invited_id))}…` : 'Place libre'}</span>`}</li></ul>
+      ${d.leader_id === u.id && !d.mate_id ? `<form method="post" action="/classe/duo/inviter" class="stack"><input name="pseudo" placeholder="Pseudo de ton ami" maxlength="20" required><button class="btn ghost sm">Inviter</button></form>` : ''}
+      <form method="post" action="/classe/duo/quitter"><button class="btn ghost sm">${d.leader_id === u.id ? 'Dissoudre le duo' : 'Quitter le duo'}</button></form>`
+      : `<h3>👥 Duo classé</h3>${s.inv.map(i => `<div class="invite"><b>${esc(i.leader)}</b> t'invite en duo (${esc(i.game)}) <form method="post" action="/classe/duo/accepter" class="inline"><input type="hidden" name="id" value="${i.id}"><button class="btn sm rk">Accepter</button></form></div>`).join('')}
+      <form method="post" action="/classe/duo/rejoindre" class="stack"><input name="code" placeholder="Code duo (5 car.)" maxlength="5" class="code-input" required><button class="btn ghost sm">Rejoindre un duo</button></form>`;
     res.page('Matchmaking', `<section><h1>⚔️ Matchmaking</h1><p class="muted">Rejoins une file : dès que assez de joueurs attendent, ou dès qu'une partie se termine, les équipes sont formées automatiquement et équilibrées par SR. Mise à jour en direct toutes les 3 s.</p>
     ${s.lobby ? `<div class="ok-box">🎮 Tu es dans la partie <a href="/parties/${s.lobby.code}"><b class="code">${s.lobby.code}</b></a> (${s.lobby.status === 'attente' ? 'en attente' : 'en cours'}).</div>` : ''}
-    <div class="mm-cols"><div><h2>Files d'attente</h2><div class="queue-grid">${cards}</div></div>
-    <aside class="panel"><h3>🔒 Partie privée</h3>${req.user ? `<form method="post" action="/parties" class="stack"><select name="gm">${modeOpts()}</select><button class="btn">Créer une partie privée</button></form>
+    <div class="mm-cols"><div><section class="ranked-sec"><h2>🏆 Classé <small class="muted">— solo ou duo, SR en jeu</small></h2>
+    <p class="muted sm">Équipes équilibrées par SR, duos toujours dans la même équipe. Écart de SR autorisé : ±${R.SPREAD0}, puis +${R.SPREAD_STEP} toutes les ${R.STEP_S} s d'attente.</p>
+    <div class="queue-grid">${rcards}</div></section>
+    <h2>⚡ Partie rapide <small class="muted">— sans impact sur le SR</small></h2><div class="queue-grid">${cards}</div></div>
+    <aside class="panel">${duoPanel}<h3>🔒 Partie privée</h3>${req.user ? `<form method="post" action="/parties" class="stack"><select name="gm">${modeOpts()}</select><button class="btn">Créer une partie privée</button></form>
     <h3>🔑 Rejoindre avec un code</h3><form method="post" action="/parties/rejoindre" class="stack"><input name="code" placeholder="EX : AB12CD" maxlength="6" class="code-input" required><button class="btn ghost">Rejoindre</button></form>`
       : '<p><a href="/connexion?next=/matchmaking">Connecte-toi</a> pour jouer.</p>'}
     <h3>📡 Live</h3><p class="muted">${s.live} partie(s) en cours</p></aside></div></section>${poll('/api/matchmaking', s.v, 'partie')}`);
@@ -116,11 +149,20 @@ module.exports = (app, { auth, admin }) => {
   const go = (req, res, fn) => { try { const r = fn(); return r; } catch (e) { req.flash('err', e.message); res.redirect(303, '/matchmaking'); return null; } };
   app.post('/matchmaking/rejoindre', auth, (req, res) => {
     const [g, m] = String(req.body.gm || '').split('|');
+    R.leaveRanked(req.user.id);
     const r = go(req, res, () => M.joinQueue(req.user.id, g, m)); if (!r) return;
     const l = M.activeLobby(req.user.id);
     if (l) { req.flash('ok', 'Partie trouvée !'); return res.redirect(303, `/parties/${l.code}`); }
     req.flash('ok', `Tu es dans la file ${g} ${m}.`); res.redirect(303, '/matchmaking');
   });
+  const rk = fn => (req, res) => { try { const msg = fn(req); const l = M.activeLobby(req.user.id); if (l) { req.flash('ok', 'Partie classée trouvée !'); return res.redirect(303, `/parties/${l.code}`); } req.flash('ok', msg); } catch (e) { req.flash('err', e.message); } res.redirect(303, '/matchmaking'); };
+  app.post('/classe/rejoindre', auth, rk(req => { R.joinRanked(req.user.id, req.body.game); return `Tu es dans la file classée ${req.body.game}.`; }));
+  app.post('/classe/quitter', auth, rk(req => { R.leaveRanked(req.user.id); return 'Tu as quitté la file classée.'; }));
+  app.post('/classe/duo', auth, rk(req => `Duo créé (code ${R.createDuo(req.user.id, req.body.game)}). Invite ton ami !`));
+  app.post('/classe/duo/inviter', auth, rk(req => `Invitation envoyée à ${R.invite(req.user.id, req.body.pseudo)}.`));
+  app.post('/classe/duo/accepter', auth, rk(req => { R.joinDuo(req.user.id, { id: req.body.id }); return 'Duo rejoint !'; }));
+  app.post('/classe/duo/rejoindre', auth, rk(req => { R.joinDuo(req.user.id, { code: req.body.code }); return 'Duo rejoint !'; }));
+  app.post('/classe/duo/quitter', auth, rk(req => { R.leaveDuo(req.user.id); return 'Tu as quitté le duo.'; }));
   app.post('/matchmaking/quitter', auth, (req, res) => { db.prepare('DELETE FROM queue WHERE user_id=?').run(req.user.id); req.flash('ok', 'Tu as quitté la file.'); res.redirect(303, '/matchmaking'); });
   app.post('/parties', auth, (req, res) => {
     const [g, m] = String(req.body.gm || '').split('|');
@@ -138,7 +180,7 @@ module.exports = (app, { auth, admin }) => {
   app.get('/api/parties/:code', (req, res) => {
     const s = lobbyState(req.params.code); if (!s) return res.status(404).json({});
     const next = req.user && s.l.status === 'termine' ? M.activeLobby(req.user.id) : null;
-    res.json({ v: s.v, code: s.l.code, statut: s.l.status, equipe_gagnante: s.l.winner_team, joueurs: s.ps.map(p => ({ pseudo: p.pseudo, equipe: p.team, sr_avant: p.sr_before, sr_apres: p.sr_after })),
+    res.json({ v: s.v, code: s.l.code, classe: !!s.l.ranked, statut: s.l.status, equipe_gagnante: s.l.winner_team, joueurs: s.ps.map(p => ({ pseudo: p.pseudo, equipe: p.team, sr_avant: p.sr_before, sr_apres: p.sr_after })),
       prochaine: next && next.status === 'en_cours' ? `/parties/${next.code}` : null });
   });
   app.get('/parties/:code', (req, res) => {
@@ -153,7 +195,7 @@ module.exports = (app, { auth, admin }) => {
     const team = t => `<div class="team-box ${l.winner_team === t ? 'win' : l.winner_team ? 'lose' : ''}"><h3>Équipe ${t === 1 ? 'Alpha' : 'Bravo'} ${l.winner_team === t ? '🏆' : ''}</h3><p class="muted sm">SR moyen ${avg(t)}</p><ul>${ps.filter(p => p.team === t).map(pl).join('') || '<li class="muted">—</li>'}</ul>
       ${isHost && l.status === 'en_cours' ? `<form method="post" action="/parties/${l.code}/resultat"><input type="hidden" name="winner" value="${t}"><button class="btn sm">Victoire Équipe ${t === 1 ? 'Alpha' : 'Bravo'}</button></form>` : ''}</div>`;
     const waiting = ps.filter(p => !p.team);
-    res.page(`Partie ${l.code}`, `<section class="lobby" style="--gc:${g.color}"><div class="dhead"><span class="gicon xl">${g.icon}</span><div><span class="badge ${ST[0]}">${ST[1]}</span> <span class="badge ex">${l.is_private ? 'Privée' : 'Matchmaking'}</span>
+    res.page(`Partie ${l.code}`, `<section class="lobby" style="--gc:${g.color}"><div class="dhead"><span class="gicon xl">${g.icon}</span><div><span class="badge ${ST[0]}">${ST[1]}</span> <span class="badge ${l.ranked ? 'classe' : 'ex'}">${l.ranked ? '🏆 Classé' : l.is_private ? 'Privée · sans SR' : 'Partie rapide · sans SR'}</span>
     <h1>${esc(l.game)} · ${l.mode}</h1><p>Code de la partie : <b class="code big">${l.code}</b></p></div></div>
     ${l.status === 'attente' ? `<div class="panel"><h3>Salle d'attente (${ps.length} / ${2 * l.team_size})</h3><ul class="entrants">${waiting.map(pl).join('')}</ul>
       <p class="muted">Partage le code <b class="code">${l.code}</b> : la partie démarre automatiquement quand elle est complète (équipes équilibrées par SR).</p>

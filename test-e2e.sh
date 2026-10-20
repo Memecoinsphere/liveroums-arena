@@ -70,7 +70,7 @@ SR0=$(js $HOST 'd["ratings"].get("Fortnite",1000)')
 q q1$R -o /dev/null -d winner=1 $B/parties/$G1/resultat
 ok "Non-hôte ne peut pas déclarer" 'q q3$R -L -d winner=1 $B/parties/$G1/resultat | grep -q "Seul l"'
 ok "Partie terminée" 'curl -s $B/api/parties/$G1 | grep -q "\"statut\":\"termine\""'
-ok "SR mis à jour (gagnant ↑)" '[ "$(js $HOST "d[\"ratings\"][\"Fortnite\"]")" -gt "$SR0" ]'
+ok "Partie rapide : SR inchangé (non classée)" '[ "$(js $HOST "d[\"ratings\"].get(\"Fortnite\",1000)")" = "$SR0" ]'
 G2=$(js q3$R 'd["lobby"]')
 ok "Fin de partie → joueur en attente tiré dans une nouvelle partie" '[ ${#G2} = 6 ] && [ "$G2" != "$G1" ] && curl -s $B/api/parties/$G2 | grep -q "en_cours"'
 CODE=$(q q4$R -o /dev/null -w %{redirect_url} -d "gm=Rocket League|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
@@ -81,7 +81,6 @@ A2=$(mktemp); curl -s -c $A2 -b $A2 -o /dev/null -d "login=admin@liveroums.gg&pa
 M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/$TC | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
 SRW=$(js $W 'd["ratings"].get("CS2",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
 ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"CS2\"]")" -gt "$SRW" ]'
-ok "Classement Fortnite liste le joueur après sa partie" 'curl -s "$B/classement?jeu=Fortnite" | grep -q "$HOST"'
 # ---------- Chat de pré-partie ----------
 mk h$R; mk o$R
 CC=$(q h$R -o /dev/null -w %{redirect_url} -d "gm=Valorant|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
@@ -101,4 +100,29 @@ sleep 1
 q h$R -o /dev/null --data-urlencode "message=<script>alert(1)</script><img src=x onerror=alert(2)>" $B/api/parties/$CC/chat
 ok "Chat : XSS échappé dans la page" 'P1=$(q h$R $B/parties/$CC); echo "$P1" | grep -q "&lt;script&gt;alert(1)&lt;/script&gt;&lt;img" && ! echo "$P1" | grep -q "<script>alert(1)" && ! echo "$P1" | grep -q "<img src=x"'
 ok "Chat : limite de débit (429)" 'for i in 1 2 3 4 5 6 7; do q h$R -o /dev/null -d message=spam$i $B/api/parties/$CC/chat; done; [ "$(q h$R -o /dev/null -w %{http_code} -d message=encore $B/api/parties/$CC/chat)" = 429 ]'
+# ---------- Mode Classé (solo / duo) ----------
+for n in r1 r2 r3 d1 d2 d3 s1 s2 s3 s4; do mk $n$R; done
+api(){ curl -s $B/api/parties/$1 | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
+q r1$R -o /dev/null -d game=Fortnite $B/classe/rejoindre
+ok "Classé : 1 joueur solo en file, pas de partie" '[ "$(js r1$R "d[\"ranked_queue\"]")" = Fortnite ] && [ "$(js r1$R "d[\"lobby\"]")" = None ]'
+q r2$R -o /dev/null -d game=Fortnite $B/classe/rejoindre
+RK=$(js r1$R 'd["lobby"]')
+ok "Classé solo : partie 1v1 créée, badge Classé" '[ ${#RK} = 6 ] && [ "$(js r2$R "d[\"lobby\"]")" = "$RK" ] && [ "$(api $RK "d[\"classe\"]")" = True ] && curl -s $B/parties/$RK | grep -q "🏆 Classé"'
+ok "Classé : page de partie avec chat de pré-partie" 'q r1$R $B/parties/$RK | grep -q "Chat de pré-partie"'
+RW=$(api $RK '[p["pseudo"] for p in d["joueurs"] if p["equipe"]==1][0]'); RL=$(api $RK '[p["pseudo"] for p in d["joueurs"] if p["equipe"]==2][0]')
+q r1$R -o /dev/null -d winner=1 $B/parties/$RK/resultat
+ok "Classé : le résultat modifie le SR (gagnant ↑, perdant ↓)" '[ "$(js $RW "d[\"ratings\"][\"Fortnite\"]")" -gt 1000 ] && [ "$(js $RL "d[\"ratings\"][\"Fortnite\"]")" -lt 1000 ]'
+ok "Classement Fortnite liste le joueur classé" 'curl -s "$B/classement?jeu=Fortnite" | grep -q "$RW"'
+ok "Duo refusé en jeu 1v1 (Fortnite)" 'q r3$R -L -d game=Fortnite $B/classe/duo | grep -q "Duo impossible"'
+ok "Matchmaking : duo non autorisé affiché pour les jeux 1v1" 'curl -s $B/matchmaking | grep -q "Duo non autorisé (1v1)"'
+DC=$(q d1$R -L -d "game=Rocket League" $B/classe/duo | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+ok "Duo créé avec code (5 car.)" '[ ${#DC} = 5 ]'
+q d1$R -o /dev/null -d pseudo=d2$R $B/classe/duo/inviter
+DID=$(q d2$R $B/matchmaking | grep -o "name=\"id\" value=\"[0-9]*\"" | grep -o "[0-9]*")
+ok "Invitation duo reçue et acceptée" 'q d2$R -L -d id=$DID $B/classe/duo/accepter | grep -q "Duo rejoint"'
+ok "Duo de 3 refusé (2 max)" 'q d3$R -L -d code=$DC $B/classe/duo/rejoindre | grep -q "Duo complet"'
+q d1$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre
+for n in s1 s2 s3 s4; do q $n$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre; done
+DL=$(js d1$R 'd["lobby"]')
+ok "Duo classé : partie 3v3 créée, duo dans la même équipe" '[ ${#DL} = 6 ] && [ "$(api $DL "d[\"classe\"]")" = True ] && [ "$(api $DL "len(d[\"joueurs\"])")" = 6 ] && [ "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d1$R\"][0]")" = "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d2$R\"][0]")" ]'
 echo "Résultat : $P réussis, $F échoués"

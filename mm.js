@@ -113,11 +113,12 @@ function declareResult(lid, winnerTeam) {
   const w = ps.filter(p => p.team === +winnerTeam).map(p => p.user_id), lo = ps.filter(p => p.team !== +winnerTeam).map(p => p.user_id);
   let next = [];
   db.transaction(() => {
-    const after = applyResult(l.game, w, lo);
+    // Seules les parties classées modifient le SR (les parties rapides / privées n'ont aucun impact)
+    const after = l.ranked ? applyResult(l.game, w, lo) : {};
     Object.entries(after).forEach(([id, sr]) => db.prepare('UPDATE lobby_players SET sr_after=? WHERE lobby_id=? AND user_id=?').run(sr, lid, +id));
     db.prepare("UPDATE lobbies SET status='termine', winner_team=?, ended_at=CURRENT_TIMESTAMP WHERE id=?").run(+winnerTeam, lid);
     db.emit('game_result', { lobby_id: lid, winner_team: +winnerTeam });
-    if (!l.is_private) ps.forEach(p => db.prepare('INSERT OR IGNORE INTO queue(user_id,game,mode) VALUES(?,?,?)').run(p.user_id, l.game, l.mode));
+    if (!l.is_private && !l.ranked) ps.forEach(p => db.prepare('INSERT OR IGNORE INTO queue(user_id,game,mode) VALUES(?,?,?)').run(p.user_id, l.game, l.mode));
   })();
   next = tryMatch(l.game, l.mode);
   return next;
