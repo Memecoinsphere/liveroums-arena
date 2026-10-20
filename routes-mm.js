@@ -2,12 +2,13 @@
 const db = require('./db');
 const M = require('./mm');
 const R = require('./ranked');
-const { esc, GAMES } = require('./views');
+const { esc, GAMES, GAME } = require('./views');
 const P = require('./points');
 
 const rank = (sr, withSr = true) => { const t = M.tier(sr); return `<span class="rank" style="--rc:${t.color}" title="${t.name} · ${sr} SR">◆ ${t.name}${withSr ? ` <b>${sr}</b>` : ''}</span>`; };
-const PROVIDERS = { discord: ['Discord', '💬'], steam: ['Steam', '🟦'], psn: ['PlayStation Network', '🎮'], xbox: ['Xbox Live', '🟩'], epic: ['Epic Games', '⬛'],
-  riot: ['Riot Games', '🟥'], battlenet: ['Battle.net', '🔷'], nintendo: ['Nintendo', '🔴'] };
+// Comptes pertinents pour Call of Duty (Discord sert à la connexion)
+const PROVIDERS = { discord: ['Discord', '💬'], activision: ['Activision ID', '🪖'], psn: ['PlayStation Network', '🎮'], xbox: ['Xbox Live', '🟩'],
+  battlenet: ['Battle.net', '🔷'], steam: ['Steam', '🟦'] };
 const poll = (url, v, redirectKey) => `<script>(()=>{const v0=${JSON.stringify(v)};setInterval(async()=>{try{const r=await fetch(${JSON.stringify(url)},{cache:'no-store'});const j=await r.json();
 ${redirectKey ? `if(j.${redirectKey})return location.href=j.${redirectKey};` : ''}if(j.v!==v0)location.reload();}catch(e){}},3000);})();</script>`;
 const STEAM = 'https://steamcommunity.com/openid/login';
@@ -26,10 +27,9 @@ function linkedList(uid) {
 module.exports = (app, { auth, admin }) => {
   // ---------- Classement ----------
   app.get('/classement', (req, res) => {
-    const game = GAMES[req.query.jeu] ? req.query.jeu : 'Valorant';
+    const game = GAME;
     const rows = db.prepare(`SELECT u.pseudo, u.id uid, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? AND r.wins + r.losses > 0 ORDER BY r.sr DESC LIMIT 100`).all(game);
-    res.page('Classement', `<section><h1>🏅 Classement SR <span class="badge classe">Classé</span></h1>
-    <div class="tabs">${Object.keys(GAMES).map(g => `<a class="${g === game ? 'active' : ''}" href="/classement?jeu=${encodeURIComponent(g)}">${GAMES[g].icon} ${esc(g)}</a>`).join('')}</div>
+    res.page('Classement', `<section><h1>🏅 Classement SR ${GAMES[GAME].icon} Call of Duty <span class="badge classe">Classé</span></h1>
     <div class="tiers">${M.TIERS.map(([min, n, c]) => `<span class="rank" style="--rc:${c}">◆ ${n} <small>${min}+</small></span>`).join('')}</div>
     <div class="table-wrap"><table class="lb"><tr><th>#</th><th>Joueur</th><th>Rang</th><th>SR</th><th>V / D</th><th>% victoires</th></tr>
     ${rows.map((r, i) => `<tr class="${i < 3 ? 'top' + (i + 1) : ''}"><td class="pos">${i + 1}</td><td>${P.nameHtml(r.uid, r.pseudo)}</td><td>${rank(r.sr, false)}</td><td><b>${r.sr}</b></td><td>${r.wins} / ${r.losses}</td><td>${r.wins + r.losses ? Math.round(r.wins / (r.wins + r.losses) * 100) : 0}%</td></tr>`).join('') || '<tr><td colspan="6" class="muted">Aucun joueur classé.</td></tr>'}
@@ -107,7 +107,7 @@ module.exports = (app, { auth, admin }) => {
     const cnt = (g, m) => s.counts.find(c => c.game === g && c.mode === m)?.n || 0;
     const cards = Object.entries(M.MODES).flatMap(([g, ms]) => ms.map(m => {
       const n = cnt(g, m), need = 2 * M.teamSize(m), me = s.mine && s.mine.game === g && s.mine.mode === m;
-      return `<div class="queue-card ${me ? 'me' : ''}" style="--gc:${GAMES[g].color}"><div class="qc-head"><span class="gicon">${GAMES[g].icon}</span><div><b>${esc(g)}</b><span class="mode">${m}</span></div><span class="badge rapide">Rapide</span></div>
+      return `<div class="queue-card ${me ? 'me' : ''}" style="--gc:${(GAMES[g] || GAMES[GAME]).color}"><div class="qc-head"><span class="gicon">${(GAMES[g] || GAMES[GAME]).icon}</span><div><b>${esc(g)}</b><span class="mode">${m}</span></div><span class="badge rapide">Rapide</span></div>
       <div class="bar"><i style="width:${Math.min(100, n / need * 100)}%"></i></div><p class="muted sm">${n} / ${need} joueurs en attente${req.user ? ` · ton SR : ${rank(M.getSR(req.user.id, g))}` : ''}</p>
       ${req.user ? (me ? `<form method="post" action="/matchmaking/quitter"><button class="btn ghost sm">Quitter la file</button></form><span class="searching">⏳ Recherche en cours…</span>`
         : `<form method="post" action="/matchmaking/rejoindre"><input type="hidden" name="gm" value="${esc(g)}|${m}"><button class="btn sm" ${s.lobby ? 'disabled' : ''}>Rejoindre la file</button></form>`) : ''}</div>`;
@@ -127,7 +127,7 @@ module.exports = (app, { auth, admin }) => {
         else act = `<div class="rk-acts"><form method="post" action="/classe/rejoindre"><input type="hidden" name="game" value="${esc(g)}"><button class="btn sm rk">👤 Solo</button></form>
           ${R.duoAllowed(g) ? `<form method="post" action="/classe/duo"><input type="hidden" name="game" value="${esc(g)}"><button class="btn ghost sm">👥 Créer un duo</button></form>` : ''}</div>`;
       }
-      return `<div class="queue-card ranked-card ${me ? 'me' : ''}" style="--gc:${GAMES[g].color}"><div class="qc-head"><span class="gicon">${GAMES[g].icon}</span><div><b>${esc(g)}</b><span class="mode">${R.fmt(g)}</span></div><span class="badge classe">Classé</span></div>
+      return `<div class="queue-card ranked-card ${me ? 'me' : ''}" style="--gc:${(GAMES[g] || GAMES[GAME]).color}"><div class="qc-head"><span class="gicon">${(GAMES[g] || GAMES[GAME]).icon}</span><div><b>${esc(g)}</b><span class="mode">${R.fmt(g)}</span></div><span class="badge classe">Classé</span></div>
       <div class="bar"><i style="width:${Math.min(100, n / need * 100)}%"></i></div><p class="muted sm">${n} / ${need} joueurs en file${u ? ` · ton SR : ${rank(M.getSR(u.id, g))}` : ''}</p>
       <p class="sm ${R.duoAllowed(g) ? 'muted' : 'warn-txt'}">${R.duoAllowed(g) ? 'Solo ou duo (2 max)' : `🚫 Duo non autorisé (${R.fmt(g)}) : solo uniquement`}</p>${act}</div>`;
     }).join('');
@@ -187,7 +187,7 @@ module.exports = (app, { auth, admin }) => {
   });
   app.get('/parties/:code', (req, res) => {
     const s = lobbyState(req.params.code); if (!s) return res.status(404).page('Introuvable', '<h1>Partie introuvable</h1>');
-    const { l, ps } = s; const g = GAMES[l.game];
+    const { l, ps } = s; const g = GAMES[l.game] || { icon: '🎮', color: '#00f0ff' };
     const isHost = req.user && (req.user.id === l.host_id || req.user.is_admin);
     const inLobby = req.user && ps.some(p => p.user_id === req.user.id);
     const ST = { attente: ['ouvert', 'En attente de joueurs'], en_cours: ['en_cours', 'En cours'], termine: ['termine', 'Terminée'] }[l.status];

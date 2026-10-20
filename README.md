@@ -13,13 +13,12 @@ Variable conseillée en production : `SESSION_SECRET`.
 
 **Comptes d'exemple**
 - Admin : `admin@liveroums.gg` / `Admin123!`
-- Joueurs : `neoblaze@exemple.gg` (et ShadowFox, KiraVolt…) / `Joueur123!`
 
-Les tournois préfixés **[EXEMPLE]** (Valorant, League of Legends, Rocket League, EA FC, Fortnite, CS2) sont des données de démonstration.
+Le site est **100 % Call of Duty** : un seul jeu (tournois, classé 4v4 solo/duo, parties rapides 4v4/2v2/1v1, parties privées). Seul le compte admin est créé au démarrage (mot de passe remplaçable via `ADMIN_PASSWORD`).
 
 ## Fonctionnalités
-- **Accueil** : hero, tournois à la une, jeux populaires.
-- **/tournois** : recherche + filtres jeu, plateforme, format (solo/équipe), statut.
+- **Accueil** : hero, tournois à la une, modes Call of Duty.
+- **/tournois** : recherche + filtres plateforme, format (solo/équipe), statut.
 - **/tournois/:id** : règlement, cashprize, dates, places, liste des inscrits, bracket.
 - **Comptes** : inscription (pseudo, email, mot de passe, plateforme, ID de jeu), connexion, déconnexion.
 - **Inscription tournoi** : solo, ou équipe (création d'équipe + coéquipiers). Capacité maximale et double inscription bloquées (transaction + contrainte UNIQUE).
@@ -29,25 +28,24 @@ Les tournois préfixés **[EXEMPLE]** (Valorant, League of Legends, Rocket Leagu
 - API lecture : `GET /api/tournois`.
 
 ## Tests
-`./test-e2e.sh` (serveur lancé, base fraîchement seedée) : 21 tests curl de bout en bout. `python3 screenshots.py` : captures Playwright dans `screenshots/`.
+`./test-e2e.sh` (serveur lancé avec `NODE_ENV=test WHEEL_TEST_FORCE=1`, base fraîche, `BASE_URL` optionnel) : 126 tests curl de bout en bout ; `node --test test-discord-oauth.js`. `python3 screenshots.py` : captures Playwright dans `screenshots/`.
 
 ## Structure
 `server.js` (routes) · `db.js` (schéma + seed) · `bracket.js` (bracket) · `views.js` (gabarits HTML) · `public/style.css`
 
 ## Skill rating (SR)
-- SR par joueur **et par jeu**, système Elo (départ 1000, K=32, moyenne d'équipe pour le calcul) mis à jour après chaque match de tournoi (solo : joueur ; équipe : capitaine) et chaque partie de matchmaking.
+- SR par joueur (Call of Duty), système Elo (départ 1000, K=32, moyenne d'équipe pour le calcul) mis à jour après chaque match de tournoi (solo : joueur ; équipe : capitaine) et chaque partie de matchmaking.
 - Rangs : Bronze (<900) → Argent (900) → Or (1050) → Platine (1200) → Diamant (1350) → Maître (1500) → Légende (1700+), affichés en badge à côté des pseudos.
-- Classement par jeu : `/classement?jeu=CS2`. Profil public : `/joueurs/<pseudo>`.
+- Classement : `/classement`. Profil public : `/joueurs/<pseudo>`.
 
 ## Comptes liés
 - **Steam** : vraie connexion OpenID 2.0 (`/auth/steam` → steamcommunity.com → `/auth/steam/retour`, signature vérifiée par `check_authentication`, SteamID64 extrait). Aucune clé API nécessaire, mais Steam doit pouvoir rediriger le navigateur vers une **URL publique** : définir `PUBLIC_URL=https://mon-domaine.fr` (en local `localhost` fonctionne côté navigateur mais le `realm` affiché sera localhost).
-- **PlayStation, Xbox, Epic Games, Riot, Battle.net, Nintendo** : saisie manuelle de l'ID, marquée « non vérifié ». Une vérification réelle demande les API partenaires officielles (PSN/Xbox/Nintendo : programmes partenaires fermés ; Epic, Riot RSO, Battle.net : OAuth avec application approuvée et clés client).
+- **Activision ID, PlayStation Network, Xbox Live, Battle.net** : saisie manuelle de l'ID, marquée « non vérifié ». Une vérification réelle demande les API partenaires officielles (PSN/Xbox : programmes partenaires fermés ; Activision, Battle.net : OAuth avec application approuvée et clés client).
 
 ## Matchmaking & parties
-- `/matchmaking` : files par jeu et mode (5v5, 3v3, 2v2, 1v1). Dès que 2×N joueurs attendent, une partie est créée avec un **code à 6 caractères**, équipes équilibrées par SR (tri décroissant + affectation à l'équipe la plus faible). L'hôte est le premier joueur en file.
+- `/matchmaking` : files Call of Duty par mode (4v4, 2v2, 1v1) + file classée 4v4 (solo ou duo, 2 max). Dès que 2×N joueurs attendent, une partie est créée avec un **code à 6 caractères**, équipes équilibrées par SR (tri décroissant + affectation à l'équipe la plus faible). L'hôte est le premier joueur en file.
 - Fin de partie (hôte ou admin déclare l'équipe gagnante) : SR mis à jour, les joueurs d'une partie publique sont remis **en fin de file**, et les joueurs en attente sont immédiatement placés dans une nouvelle partie.
 - Partie privée : création avec code, « Rejoindre avec un code », démarrage automatique quand elle est complète (ou « Lancer maintenant » par l'hôte).
 - Mises à jour en direct par polling toutes les 3 s (`/api/matchmaking`, `/api/parties/<code>`), redirection automatique vers la partie trouvée.
-- Données d'exemple : lobby privé **DEMO42** (Rocket League 2v2), 4 joueurs en file Valorant 5v5, SR et comptes liés d'exemple.
 
 Captures : `python3 screenshots-sr.py`.

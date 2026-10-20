@@ -1,11 +1,8 @@
 // Gabarits HTML (rendu serveur)
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const GAMES = {
-  'Valorant': { icon: '🎯', color: '#ff4655' }, 'League of Legends': { icon: '🛡️', color: '#c89b3c' },
-  'Rocket League': { icon: '🚗', color: '#0096ff' }, 'EA FC': { icon: '⚽', color: '#00ff87' },
-  'Fortnite': { icon: '🪂', color: '#b14bff' }, 'CS2': { icon: '💣', color: '#f5a623' },
-  'Call of Duty': { icon: '🪖', color: '#7cb342' },
-};
+// Site 100 % Call of Duty : un seul jeu
+const GAME = 'Call of Duty';
+const GAMES = { [GAME]: { icon: '🪖', color: '#7cb342' } };
 const PLATFORMS = ['PC', 'PlayStation', 'Xbox', 'Switch', 'Mobile', 'Multiplateforme'];
 const fmtDate = s => new Date(s).toLocaleString('fr-FR', { dateStyle: 'medium', timeStyle: 'short', timeZone: 'Europe/Paris' });
 function status(t) {
@@ -56,4 +53,4 @@ function bracketHtml(matches, isAdmin, tid) {
   const champ = matches.find(m => m.round === rounds)?.winner;
   return h + `<div class="round champ"><h4>Champion</h4><div class="match"><div class="slot win">${champ ? '👑 ' + esc(champ) : '<i class="muted">?</i>'}</div></div></div></div>`;
 }
-module.exports = { esc, layout, card, status, bracketHtml, fmtDate, GAMES, PLATFORMS };
+module.exports = { GAME, esc, layout, card, status, bracketHtml, fmtDate, GAMES, PLATFORMS };

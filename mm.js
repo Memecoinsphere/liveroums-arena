@@ -6,8 +6,7 @@ const K = 32, START = 1000;
 const TIERS = [[0, 'Bronze', '#cd7f32'], [900, 'Argent', '#c0c8d8'], [1050, 'Or', '#ffd23f'], [1200, 'Platine', '#3fe0c5'],
   [1350, 'Diamant', '#5aa9ff'], [1500, 'Maître', '#c04bff'], [1700, 'Légende', '#ff3d6e']];
 const tier = sr => { let t = TIERS[0]; for (const x of TIERS) if (sr >= x[0]) t = x; return { name: t[1], color: t[2], min: t[0] }; };
-const MODES = { 'Valorant': ['5v5', '1v1'], 'League of Legends': ['5v5', '1v1'], 'Rocket League': ['3v3', '2v2', '1v1'],
-  'EA FC': ['1v1', '2v2'], 'Fortnite': ['1v1', '2v2'], 'CS2': ['5v5', '2v2', '1v1'], 'Call of Duty': ['4v4', '2v2', '1v1'] };
+const MODES = { 'Call of Duty': ['4v4', '2v2', '1v1'] }; // seul jeu supporté
 const teamSize = mode => parseInt(mode, 10);
 
 function getSR(uid, game) {

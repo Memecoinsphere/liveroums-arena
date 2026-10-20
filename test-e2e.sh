@@ -20,17 +20,17 @@ c(){ curl -s -b $J -c $J "$@"; }
 # Base vierge : vérification des états vides, puis l'admin crée les tournois utilisés par les tests
 ok "Liste tournois vide (état vide)" 'curl -s $B/tournois | grep -q "Aucun tournoi pour le moment"'
 ok "Accueil : 0 tournoi" 'curl -s $B/ | grep -q "<b>0</b><span>tournois"'
-ok "Classement vide (état vide)" 'curl -s "$B/classement?jeu=Valorant" | grep -q "Aucun joueur classé"'
+ok "Classement vide (état vide)" 'curl -s "$B/classement" | grep -q "Aucun joueur classé"'
 A=$(mktemp); curl -s -c $A -b $A -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
 D(){ date -d "$1" +%Y-%m-%dT%H:%M; }
 mkT(){ curl -s -c $A -b $A -o /dev/null -w %{redirect_url} --data-urlencode "name=$1" -d "$2" $B/admin/tournois | grep -o "[0-9]*$"; }
-TE=$(mkT "Valorant Cup $RANDOM" "game=Valorant&platform=PC&format=equipe&team_size=5&max_slots=16&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
-TR=$(mkT "RL Duo $RANDOM" "game=Rocket+League&platform=Multiplateforme&format=equipe&team_size=2&max_slots=16&start_date=$(D '+5 days')&reg_close=$(D '+4 days')")
-TF=$(mkT "EA FC League $RANDOM" "game=EA+FC&platform=PlayStation&format=solo&max_slots=8&start_date=$(D '+3 days')&reg_close=$(D '+2 days')")
-TC=$(mkT "CS2 Open $RANDOM" "game=CS2&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '+12 hours')")
-TX=$(mkT "Fortnite Clos $RANDOM" "game=Fortnite&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '-1 day')")
+TE=$(mkT "CoD Squad Cup $RANDOM" "game=Call+of+Duty&platform=PC&format=equipe&team_size=5&max_slots=16&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
+TR=$(mkT "CoD Duo $RANDOM" "game=Call+of+Duty&platform=Multiplateforme&format=equipe&team_size=2&max_slots=16&start_date=$(D '+5 days')&reg_close=$(D '+4 days')")
+TF=$(mkT "CoD League $RANDOM" "game=Call+of+Duty&platform=PlayStation&format=solo&max_slots=8&start_date=$(D '+3 days')&reg_close=$(D '+2 days')")
+TC=$(mkT "CoD Open $RANDOM" "game=Call+of+Duty&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '+12 hours')")
+TX=$(mkT "CoD Clos $RANDOM" "game=Call+of+Duty&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '-1 day')")
 ok "Admin crée les tournois de test" '[ -n "$TE" ] && [ -n "$TR" ] && [ -n "$TF" ] && [ -n "$TC" ] && [ -n "$TX" ]'
-# 4 joueurs inscrits au CS2 puis bracket généré par l'admin
+# 4 joueurs inscrits au CoD Open puis bracket généré par l'admin
 for i in 1 2 3 4; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=c$i$U&email=c$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TC/inscription; done
 curl -s -c $A -b $A -o /dev/null -d x=1 $B/admin/tournois/$TC/bracket
 ok "Accueil 200" '[ "$(curl -s -o /dev/null -w %{http_code} $B/)" = 200 ]'
@@ -40,63 +40,63 @@ ok "Compte en double refusé" 'c -L -d "pseudo=$U&email=$U@test.gg&password=MotD
 c -X POST $B/deconnexion -o /dev/null
 ok "Mauvais mot de passe refusé" 'c -L -d "login=$U&password=faux" $B/connexion | grep -q "Identifiants incorrects"'
 ok "Connexion OK" '[ "$(c -o /dev/null -w %{redirect_url} -d "login=$U@test.gg&password=MotDePasse1" $B/connexion)" = "$B/profil" ]'
-ok "Inscription solo EA FC " 'c -L -d rules=on $B/tournois/$TF/inscription | grep -q "Inscription confirmée"'
+ok "Inscription solo CoD League" 'c -L -d rules=on $B/tournois/$TF/inscription | grep -q "Inscription confirmée"'
 ok "Double inscription refusée" 'c -L -d rules=on $B/tournois/$TF/inscription | grep -q "déjà inscrit"'
-ok "Inscription équipe Valorant" 'c -L -d "rules=on&team_name=Team_$U&mates=A&mates=B&mates=C&mates=D" $B/tournois/$TE/inscription | grep -q "Team_$U"'
-ok "Équipe incomplète refusée (Rocket League)" 'c -L -d "rules=on&team_name=X$U" $B/tournois/$TR/inscription | grep -q "exactement 1"'
+ok "Inscription équipe CoD Squad" 'c -L -d "rules=on&team_name=Team_$U&mates=A&mates=B&mates=C&mates=D" $B/tournois/$TE/inscription | grep -q "Team_$U"'
+ok "Équipe incomplète refusée (CoD Duo)" 'c -L -d "rules=on&team_name=X$U" $B/tournois/$TR/inscription | grep -q "exactement 1"'
 ok "Inscription refusée sur tournoi clos" 'c -L -d rules=on $B/tournois/$TX/inscription | grep -q "fermées"'
 ok "Profil liste 2 tournois" 'c $B/profil | grep -q "Mes tournois (2)"'
-# Remplir EA FC (8 places) avec d'autres comptes, puis vérifier le refus
+# Remplir CoD League (8 places) avec d'autres comptes, puis vérifier le refus
 for i in 1 2 3 4 5 6 7; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=f$i$U&email=f$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TF/inscription; done
 K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=x$U&email=x$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription
 ok "Capacité : 9e joueur refusé (complet)" 'curl -s -c $K -b $K -L -d rules=on $B/tournois/$TF/inscription | grep -q "complet"'
-ok "Désinscription EA FC" 'c -L -d x=1 $B/tournois/$TF/desinscription | grep -q "désinscrit"'
+ok "Désinscription CoD League" 'c -L -d x=1 $B/tournois/$TF/desinscription | grep -q "désinscrit"'
 ok "Profil liste 1 tournoi" 'c $B/profil | grep -q "Mes tournois (1)"'
 ok "Non-admin refusé sur création" '[ "$(c -o /dev/null -w %{http_code} $B/admin/tournois/nouveau)" = 403 ]'
-ok "Admin crée un tournoi" 'curl -s -c $A -b $A -L -d "name=Test+Cup&game=CS2&platform=PC&format=solo&max_slots=4&cashprize=50&start_date=2030-01-02T20:00&reg_close=2030-01-01T20:00" $B/admin/tournois | grep -q "Tournoi publié"'
-ok "Admin génère bracket EA FC" 'curl -s -c $A -b $A -L -d x=1 $B/admin/tournois/$TF/bracket | grep -q "Demi-finales"'
-ok "Bracket CS2 affiché" 'curl -s $B/tournois/$TC | grep -q "Finale"'
-ok "Filtre jeu=Valorant" '[ "$(curl -s "$B/tournois?jeu=Valorant" | grep -o "class=\"card\"" | wc -l)" = 1 ]'
-ok "Filtre format=solo&statut=en_cours" 'curl -s "$B/tournois?format=solo&statut=en_cours" | grep -q "CS2 Open"'
+ok "Admin crée un tournoi" 'curl -s -c $A -b $A -L -d "name=Test+Cup&game=Call+of+Duty&platform=PC&format=solo&max_slots=4&cashprize=50&start_date=2030-01-02T20:00&reg_close=2030-01-01T20:00" $B/admin/tournois | grep -q "Tournoi publié"'
+ok "Admin génère bracket CoD League" 'curl -s -c $A -b $A -L -d x=1 $B/admin/tournois/$TF/bracket | grep -q "Demi-finales"'
+ok "Bracket CoD Open affiché" 'curl -s $B/tournois/$TC | grep -q "Finale"'
+ok "Filtre plateforme=Multiplateforme" '[ "$(curl -s "$B/tournois?plateforme=Multiplateforme" | grep -o "class=\"card\"" | wc -l)" = 1 ]'
+ok "Filtre format=solo&statut=en_cours" 'curl -s "$B/tournois?format=solo&statut=en_cours" | grep -q "CoD Open"'
 
 # ---------- SR, comptes liés, matchmaking ----------
 js(){ curl -s "$B/api/joueurs/$1" | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
 mk(){ local j=/tmp/mm_$1; rm -f $j; curl -s -c $j -b $j -o /dev/null -d "pseudo=$1&email=$1@t.gg&password=MotDePasse1&platform=PC" $B/inscription; }
 R=$RANDOM; for n in 1 2 3 4 5; do mk q$n$R; done
 q(){ curl -s -c /tmp/mm_$1 -b /tmp/mm_$1 "${@:2}"; }
-ok "Classement vide au départ (état vide)" 'curl -s "$B/classement?jeu=Valorant" | grep -q "Aucun joueur classé"'
-ok "Lier un compte Riot (non vérifié)" 'c -L -d "provider=riot&account_id=Test%23EUW" $B/profil/comptes | grep -q "non vérifié"'
-ok "Comptes liés visibles sur profil public" 'curl -s $B/joueurs/$U | grep -q "Test#EUW"'
+ok "Classement vide au départ (état vide)" 'curl -s "$B/classement" | grep -q "Aucun joueur classé"'
+ok "Lier un compte Activision ID (non vérifié)" 'c -L -d "provider=activision&account_id=Test%23123" $B/profil/comptes | grep -q "non vérifié"'
+ok "Comptes liés visibles sur profil public" 'curl -s $B/joueurs/$U | grep -q "Test#123"'
 ok "Steam OpenID redirige vers steamcommunity" 'c -o /dev/null -w %{redirect_url} $B/auth/steam | grep -q "steamcommunity.com/openid/login.*checkid_setup"'
 ok "Retour Steam falsifié refusé" 'c -L "$B/auth/steam/retour?openid.mode=id_res&openid.claimed_id=x" | grep -q "Liaison Steam échouée"'
-q q1$R -o /dev/null -d "gm=Fortnite|1v1" $B/matchmaking/rejoindre
+q q1$R -o /dev/null -d "gm=Call of Duty|1v1" $B/matchmaking/rejoindre
 ok "File : 1 joueur en attente, pas de partie" '[ "$(js q1$R "d[\"lobby\"]")" = None ] && [ "$(js q1$R "d[\"queue\"][\"mode\"]")" = 1v1 ]'
-q q2$R -o /dev/null -d "gm=Fortnite|1v1" $B/matchmaking/rejoindre
+q q2$R -o /dev/null -d "gm=Call of Duty|1v1" $B/matchmaking/rejoindre
 G1=$(js q1$R 'd["lobby"]')
 ok "File → partie auto créée (code 6 car.)" '[ ${#G1} = 6 ] && [ "$(js q2$R "d[\"lobby\"]")" = "$G1" ]'
 ok "Équipes formées (1 par équipe)" 'curl -s $B/api/parties/$G1 | grep -q "\"equipe\":1" && curl -s $B/api/parties/$G1 | grep -q "\"equipe\":2"'
-q q3$R -o /dev/null -d "gm=Fortnite|1v1" $B/matchmaking/rejoindre
+q q3$R -o /dev/null -d "gm=Call of Duty|1v1" $B/matchmaking/rejoindre
 ok "3e joueur en attente" '[ "$(js q3$R "d[\"lobby\"]")" = None ]'
 HOST=$(curl -s $B/api/parties/$G1 | python3 -c "import sys,json;print([p['pseudo'] for p in json.load(sys.stdin)['joueurs'] if p['equipe']==1][0])")
-SR0=$(js $HOST 'd["ratings"].get("Fortnite",1000)')
+SR0=$(js $HOST 'd["ratings"].get("Call of Duty",1000)')
 # l'hôte (premier en file = q1) déclare la victoire de l'équipe 1
 q q1$R -o /dev/null -d winner=1 $B/parties/$G1/resultat
 ok "Non-hôte ne peut pas déclarer" 'q q3$R -L -d winner=1 $B/parties/$G1/resultat | grep -q "Seul l"'
 ok "Partie terminée" 'curl -s $B/api/parties/$G1 | grep -q "\"statut\":\"termine\""'
-ok "Partie rapide : SR inchangé (non classée)" '[ "$(js $HOST "d[\"ratings\"].get(\"Fortnite\",1000)")" = "$SR0" ]'
+ok "Partie rapide : SR inchangé (non classée)" '[ "$(js $HOST "d[\"ratings\"].get(\"Call of Duty\",1000)")" = "$SR0" ]'
 G2=$(js q3$R 'd["lobby"]')
 ok "Fin de partie → joueur en attente tiré dans une nouvelle partie" '[ ${#G2} = 6 ] && [ "$G2" != "$G1" ] && curl -s $B/api/parties/$G2 | grep -q "en_cours"'
-CODE=$(q q4$R -o /dev/null -w %{redirect_url} -d "gm=Rocket League|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
+CODE=$(q q4$R -o /dev/null -w %{redirect_url} -d "gm=Call of Duty|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
 ok "Partie privée créée avec code" '[ ${#CODE} = 6 ] && curl -s $B/api/parties/$CODE | grep -q "\"statut\":\"attente\""'
 ok "Code invalide refusé" 'q q5$R -L -d code=ZZZZZZ $B/parties/rejoindre | grep -q "introuvable"'
 ok "Rejoindre par code → partie complète démarrée" '[ "$(q q5$R -o /dev/null -w %{redirect_url} -d code=${CODE,,} $B/parties/rejoindre)" = "$B/parties/$CODE" ] && curl -s $B/api/parties/$CODE | grep -q "en_cours"'
 A2=$(mktemp); curl -s -c $A2 -b $A2 -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
 M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/$TC | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"_csrf\" value=\"[0-9a-f]*\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
-SRW=$(js $W 'd["ratings"].get("CS2",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
-ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"CS2\"]")" -gt "$SRW" ]'
+SRW=$(js $W 'd["ratings"].get("Call of Duty",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
+ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"Call of Duty\"]")" -gt "$SRW" ]'
 # ---------- Chat de pré-partie ----------
 mk h$R; mk o$R
-CC=$(q h$R -o /dev/null -w %{redirect_url} -d "gm=Valorant|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
+CC=$(q h$R -o /dev/null -w %{redirect_url} -d "gm=Call of Duty|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$")
 ok "Chat : non-membre refusé (lecture 403)" '[ "$(q o$R -o /dev/null -w %{http_code} $B/api/parties/$CC/chat)" = 403 ]'
 ok "Chat : non-membre refusé (envoi 403)" '[ "$(q o$R -o /dev/null -w %{http_code} -d message=intrus $B/api/parties/$CC/chat)" = 403 ]'
 ok "Chat : visiteur non connecté refusé" '[ "$(curl -s -o /dev/null -w %{http_code} $B/api/parties/$CC/chat)" = 403 ]'
@@ -114,30 +114,35 @@ q h$R -o /dev/null --data-urlencode "message=<script>alert(1)</script><img src=x
 ok "Chat : XSS échappé dans la page" 'P1=$(q h$R $B/parties/$CC); echo "$P1" | grep -q "&lt;script&gt;alert(1)&lt;/script&gt;&lt;img" && ! echo "$P1" | grep -q "<script>alert(1)" && ! echo "$P1" | grep -q "<img src=x"'
 ok "Chat : limite de débit (429)" 'for i in 1 2 3 4 5 6 7; do q h$R -o /dev/null -d message=spam$i $B/api/parties/$CC/chat; done; [ "$(q h$R -o /dev/null -w %{http_code} -d message=encore $B/api/parties/$CC/chat)" = 429 ]'
 # ---------- Mode Classé (solo / duo) ----------
-for n in r1 r2 r3 d1 d2 d3 s1 s2 s3 s4; do mk $n$R; done
+for n in r1 r2 r3 r4 r5 r6 r7 r8 r9 d1 d2 d3 s1 s2 s3 s4 s5 s6; do mk $n$R; done
 api(){ curl -s $B/api/parties/$1 | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
-q r1$R -o /dev/null -d game=Fortnite $B/classe/rejoindre
-ok "Classé : 1 joueur solo en file, pas de partie" '[ "$(js r1$R "d[\"ranked_queue\"]")" = Fortnite ] && [ "$(js r1$R "d[\"lobby\"]")" = None ]'
-q r2$R -o /dev/null -d game=Fortnite $B/classe/rejoindre
+q r1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
+ok "Classé : 1 joueur solo en file, pas de partie" '[ "$(js r1$R "d[\"ranked_queue\"]")" = "Call of Duty" ] && [ "$(js r1$R "d[\"lobby\"]")" = None ]'
+for n in r2 r3 r4 r5 r6 r7; do q $n$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre; done
+ok "Classé : 7 joueurs en file, toujours pas de partie (4v4)" '[ "$(js r7$R "d[\"lobby\"]")" = None ]'
+q r8$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
 RK=$(js r1$R 'd["lobby"]')
-ok "Classé solo : partie 1v1 créée, badge Classé" '[ ${#RK} = 6 ] && [ "$(js r2$R "d[\"lobby\"]")" = "$RK" ] && [ "$(api $RK "d[\"classe\"]")" = True ] && curl -s $B/parties/$RK | grep -q "🏆 Classé"'
+ok "Classé solo : partie 4v4 créée (8 joueurs), badge Classé" '[ ${#RK} = 6 ] && [ "$(js r8$R "d[\"lobby\"]")" = "$RK" ] && [ "$(api $RK "d[\"classe\"]")" = True ] && [ "$(api $RK "len(d[\"joueurs\"])")" = 8 ] && curl -s $B/parties/$RK | grep -q "🏆 Classé" && curl -s $B/parties/$RK | grep -q "Call of Duty · 4v4"'
 ok "Classé : page de partie avec chat de pré-partie" 'q r1$R $B/parties/$RK | grep -q "Chat de pré-partie"'
 RW=$(api $RK '[p["pseudo"] for p in d["joueurs"] if p["equipe"]==1][0]'); RL=$(api $RK '[p["pseudo"] for p in d["joueurs"] if p["equipe"]==2][0]')
 q r1$R -o /dev/null -d winner=1 $B/parties/$RK/resultat
-ok "Classé : le résultat modifie le SR (gagnant ↑, perdant ↓)" '[ "$(js $RW "d[\"ratings\"][\"Fortnite\"]")" -gt 1000 ] && [ "$(js $RL "d[\"ratings\"][\"Fortnite\"]")" -lt 1000 ]'
-ok "Classement Fortnite liste le joueur classé" 'curl -s "$B/classement?jeu=Fortnite" | grep -q "$RW"'
-ok "Duo refusé en jeu 1v1 (Fortnite)" 'q r3$R -L -d game=Fortnite $B/classe/duo | grep -q "Duo impossible"'
-ok "Matchmaking : duo non autorisé affiché pour les jeux 1v1" 'curl -s $B/matchmaking | grep -q "Duo non autorisé (1v1)"'
-DC=$(q d1$R -L -d "game=Rocket League" $B/classe/duo | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
+ok "Classé : le résultat modifie le SR (gagnant ↑, perdant ↓)" '[ "$(js $RW "d[\"ratings\"][\"Call of Duty\"]")" -gt 1000 ] && [ "$(js $RL "d[\"ratings\"][\"Call of Duty\"]")" -lt 1000 ]'
+ok "Classement CoD liste le joueur classé" 'curl -s "$B/classement" | grep -q "$RW"'
+ok "Jeu retiré refusé en classé (Valorant)" 'q r9$R -L -d game=Valorant $B/classe/rejoindre | grep -q "Jeu invalide"'
+ok "Jeu retiré refusé en partie rapide (Fortnite)" 'q r9$R -L -d "gm=Fortnite|1v1" $B/matchmaking/rejoindre | grep -q "Jeu ou mode invalide"'
+ok "Matchmaking : uniquement Call of Duty (classé solo/duo 2 max)" 'P4=$(curl -s $B/matchmaking); echo "$P4" | grep -q "Solo ou duo (2 max)" && ! echo "$P4" | grep -Eq "Valorant|Fortnite|CS2|Rocket League|EA FC|League of Legends"'
+DC=$(q d1$R -L -d "game=Call of Duty" $B/classe/duo | grep -o "code [A-Z0-9]\{5\}" | head -1 | cut -c6-)
 ok "Duo créé avec code (5 car.)" '[ ${#DC} = 5 ]'
 q d1$R -o /dev/null -d pseudo=d2$R $B/classe/duo/inviter
 DID=$(q d2$R $B/matchmaking | grep -o "name=\"id\" value=\"[0-9]*\"" | grep -o "[0-9]*")
 ok "Invitation duo reçue et acceptée" 'q d2$R -L -d id=$DID $B/classe/duo/accepter | grep -q "Duo rejoint"'
 ok "Duo de 3 refusé (2 max)" 'q d3$R -L -d code=$DC $B/classe/duo/rejoindre | grep -q "Duo complet"'
-q d1$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre
-for n in s1 s2 s3 s4; do q $n$R -o /dev/null -d "game=Rocket League" $B/classe/rejoindre; done
+q d1$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre
+for n in s1 s2 s3 s4 s5 s6; do q $n$R -o /dev/null -d "game=Call of Duty" $B/classe/rejoindre; done
 DL=$(js d1$R 'd["lobby"]')
-ok "Duo classé : partie 3v3 créée, duo dans la même équipe" '[ ${#DL} = 6 ] && [ "$(api $DL "d[\"classe\"]")" = True ] && [ "$(api $DL "len(d[\"joueurs\"])")" = 6 ] && [ "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d1$R\"][0]")" = "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d2$R\"][0]")" ]'
+ok "Duo classé : partie 4v4 créée, duo dans la même équipe" '[ ${#DL} = 6 ] && [ "$(api $DL "d[\"classe\"]")" = True ] && [ "$(api $DL "len(d[\"joueurs\"])")" = 8 ] && [ "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d1$R\"][0]")" = "$(api $DL "[p[\"equipe\"] for p in d[\"joueurs\"] if p[\"pseudo\"]==\"d2$R\"][0]")" ]'
+ok "Site mono-jeu : accueil, tournois et classement sans autre jeu" '! curl -s $B/ | grep -Eq "Valorant|Fortnite|CS2|Rocket League|EA FC|League of Legends" && curl -s $B/ | grep -q "Modes Call of Duty" && ! curl -s $B/tournois | grep -q "name=\"jeu\"" && ! curl -s $B/classement | grep -q "class=\"tabs\""'
+ok "Admin : tournoi d un jeu retiré forcé en Call of Duty" 'curl -s -c $A -b $A -L -d "name=Forcé+$R&game=Valorant&platform=PC&format=solo&max_slots=4&start_date=2030-01-02T20:00&reg_close=2030-01-01T20:00" $B/admin/tournois | grep -q "Call of Duty · PC"'
 # ---------- Points LiveRoums (LP) & boutique ----------
 pj(){ curl -s -b /tmp/mm_$1 $B/api/points | python3 -c "import sys,json;d=json.load(sys.stdin);print(eval(sys.argv[1]))" "$2"; }
 LOSER=$(curl -s $B/api/parties/$G1 | python3 -c "import sys,json;print([p['pseudo'] for p in json.load(sys.stdin)['joueurs'] if p['equipe']==2][0])")
@@ -202,7 +207,7 @@ ok "Sécu : verrouillage après 5 échecs (même avec le bon mot de passe)" 'cur
 ok "Sécu : limite de débit inscription (6e compte même IP → 429)" 'for i in 1 2 3 4 5 6; do T=/tmp/rl$R$i; command curl -s -c $T -b $T -o /dev/null -H "X-Forwarded-For: 10.250.250.$((R%200))" $B/api/csrf; TK=$(command curl -s -c $T -b $T -H "X-Forwarded-For: 10.250.250.$((R%200))" $B/api/csrf | sed "s/.*\"csrf\":\"\([0-9a-f]*\)\".*/\1/"); C=$(command curl -s -c $T -b $T -o /dev/null -w %{http_code} -H "X-Forwarded-For: 10.250.250.$((R%200))" -H "X-CSRF-Token: $TK" -d "pseudo=rl$i$R&email=rl$i$R@t.gg&password=MotDePasse1&platform=PC" $B/inscription); done; [ "$C" = 429 ]'
 ok "Sécu : open redirect refusé après connexion (next=//evil.com)" '[ "$(q sec2$R -o /dev/null -w %{redirect_url} -d "login=sec2$R&password=MotDePasse1&next=//evil.com" $B/connexion)" = "$B/profil" ] && [ "$(q sec2$R -o /dev/null -w %{redirect_url} -d "login=sec2$R&password=MotDePasse1&next=/\\evil.com" $B/connexion)" = "$B/profil" ]'
 ok "Sécu : XSS — pseudo avec balises refusé à l inscription" 'curl -s -c /tmp/x$R -b /tmp/x$R -L --data-urlencode "pseudo=<img src=x>" -d "email=x$R@t.gg&password=MotDePasse1&platform=PC" $B/inscription | grep -q "Pseudo invalide"'
-TV=$(mkT "XSS Cup $RANDOM" "game=Valorant&platform=PC&format=equipe&team_size=2&max_slots=8&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
+TV=$(mkT "XSS Cup $RANDOM" "game=Call+of+Duty&platform=PC&format=equipe&team_size=2&max_slots=8&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
 q sec2$R -o /dev/null --data-urlencode "team_name=<script>alert(9)</script>" --data-urlencode "mates=<img src=x onerror=alert(8)>" -d rules=on $B/tournois/$TV/inscription
 ok "Sécu : XSS — nom d équipe et coéquipier échappés" 'P2=$(curl -s $B/tournois/$TV); echo "$P2" | grep -q "&lt;script&gt;alert(9)" && ! echo "$P2" | grep -q "<script>alert(9)" && ! echo "$P2" | grep -q "<img src=x"'
 ok "Sécu : XSS — pseudo Twitch avec balises refusé" 'q sub$R -L --data-urlencode "twitch=<b>x</b>" $B/roue/lots/$CID | grep -q "Pseudo Twitch invalide"'
@@ -214,7 +219,7 @@ ok "Sécu : 404 générique sans pile d appel" 'P3=$(curl -s $B/nexiste/pas); ec
 ok "Sécu : /api/tournois n expose pas created_by" '! curl -s $B/api/tournois | grep -q created_by'
 # Anti-farm : la même paire en partie privée ne rapporte des LP que 2 fois par jour
 mk fa$R; mk fb$R
-farm(){ local C=$(q fa$R -o /dev/null -w %{redirect_url} -d "gm=EA FC|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$"); q fb$R -o /dev/null -d code=$C $B/parties/rejoindre; local T=$(api $C '[p["equipe"] for p in d["joueurs"] if p["pseudo"]=="fa'$R'"][0]'); q fa$R -o /dev/null -d winner=$T $B/parties/$C/resultat; }
+farm(){ local C=$(q fa$R -o /dev/null -w %{redirect_url} -d "gm=Call of Duty|1v1" $B/parties | grep -o "[A-Z0-9]\{6\}$"); q fb$R -o /dev/null -d code=$C $B/parties/rejoindre; local T=$(api $C '[p["equipe"] for p in d["joueurs"] if p["pseudo"]=="fa'$R'"][0]'); q fa$R -o /dev/null -d winner=$T $B/parties/$C/resultat; }
 farm; farm; FW=$(pj fa$R 'sum(h["montant"] for h in d["historique"] if h["motif"]=="Victoire (partie privée)")'); farm
 ok "Anti-farm : 3e victoire privée contre le même adversaire sans LP" '[ "$FW" = 200 ] && [ "$(pj fa$R "sum(h[\"montant\"] for h in d[\"historique\"] if h[\"motif\"]==\"Victoire (partie privée)\")")" = 200 ]'
 echo "Résultat : $P réussis, $F échoués"

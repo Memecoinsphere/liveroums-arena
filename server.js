@@ -9,7 +9,7 @@ const S = require('./services');
 const B = require('./bracket');
 const V = require('./views');
 const P = require('./points');
-const { esc, layout, card, status, GAMES, PLATFORMS } = V;
+const { esc, layout, card, status, GAMES, GAME, PLATFORMS } = V;
 
 const app = express();
 app.set('trust proxy', 1);
@@ -53,21 +53,20 @@ const getT = id => db.prepare(TQ + ' WHERE t.id=?').get(id);
 app.get('/', (req, res) => {
   const all = db.prepare(TQ + ' ORDER BY t.start_date').all();
   const featured = all.filter(t => status(t).key === 'ouvert').slice(0, 3);
-  const games = Object.entries(GAMES).map(([g, v]) => ({ g, ...v, n: all.filter(t => t.game === g).length }));
   res.page('Accueil', `
-  <section class="hero"><div class="glow"></div><p class="kicker">Saison 2026 · Plateforme 100% gaming</p>
+  <section class="hero"><div class="glow"></div><p class="kicker">Saison 2026 · Plateforme 100% Call of Duty</p>
   <h1>Entre dans l'<span class="neon">arène</span>.<br>Grimpe le <span class="neon2">bracket</span>.</h1>
-  <p class="lead">Tournois Valorant, LoL, Rocket League, EA FC, Fortnite, CS2, Call of Duty… Inscris-toi en solo ou avec ton équipe, suis le bracket en direct et décroche le cashprize.</p>
+  <p class="lead">Tournois, parties classées 4v4 et parties rapides <b>Call of Duty</b>. Inscris-toi en solo ou avec ton escouade, suis le bracket en direct et décroche le cashprize.</p>
   <div class="cta"><a class="btn lg" href="/tournois">Voir les tournois</a>${req.user ? '' : '<a class="btn ghost lg" href="/inscription">Créer mon compte</a>'}</div>
   <div class="stats"><div><b>${all.length}</b><span>tournois</span></div><div><b>${db.prepare('SELECT COUNT(*) c FROM users WHERE is_admin=0').get().c}</b><span>joueurs</span></div><div><b>${all.filter(t => status(t).key === 'ouvert').length}</b><span>inscriptions ouvertes</span></div></div></section>
   <section><div class="sec-head"><h2>🔥 Tournois à la une</h2><a href="/tournois">Tout voir →</a></div><div class="grid">${featured.map(card).join('') || `<p class="muted">${all.length ? 'Aucun tournoi ouvert.' : 'Aucun tournoi pour le moment.'}</p>`}</div></section>
-  <section><h2>🎮 Jeux populaires</h2><div class="games">${games.map(g => `<a class="game" style="--gc:${g.color}" href="/tournois?jeu=${encodeURIComponent(g.g)}"><span>${g.icon}</span><b>${esc(g.g)}</b><small>${g.n} tournoi(s)</small></a>`).join('')}</div></section>
+  <section><h2>🪖 Modes Call of Duty</h2><div class="games">${[['⚔️', 'Classé 4v4', 'Solo ou duo · SR en jeu', '/matchmaking'], ['⚡', 'Partie rapide', '4v4 · 2v2 · 1v1, sans SR', '/matchmaking'], ['🔒', 'Partie privée', 'Code à partager', '/matchmaking'], ['🏆', 'Tournois', `${all.length} tournoi(s)`, '/tournois']].map(([i, n, d, h]) => `<a class="game" style="--gc:${GAMES[GAME].color}" href="${h}"><span>${i}</span><b>${n}</b><small>${d}</small></a>`).join('')}</div></section>
   <section class="how"><h2>Comment ça marche ?</h2><div class="steps"><div><b>1</b><h4>Crée ton compte</h4><p>Pseudo, plateforme et ID de jeu.</p></div><div><b>2</b><h4>Inscris-toi</h4><p>En solo, ou crée ton équipe et ajoute tes coéquipiers.</p></div><div><b>3</b><h4>Joue le bracket</h4><p>Élimination directe générée automatiquement.</p></div></div></section>`);
 });
 
 // ---------- Liste + filtres ----------
 app.get('/tournois', (req, res) => {
-  const { jeu = '', plateforme = '', format = '', statut = '', q = '' } = req.query;
+  const jeu = ''; const { plateforme = '', format = '', statut = '', q = '' } = req.query;
   const list = db.prepare(TQ + ' ORDER BY t.start_date').all()
     .filter(t => (!jeu || t.game === jeu) && (!plateforme || t.platform === plateforme) && (!format || t.format === format)
       && (!statut || status(t).key === statut) && (!q || t.name.toLowerCase().includes(String(q).toLowerCase())));
@@ -75,7 +74,7 @@ app.get('/tournois', (req, res) => {
   const sel = (name, val, opts) => `<select name="${name}" data-autosubmit><option value="">${L[name]}</option>${opts.map(([v, l]) => `<option value="${esc(v)}" ${v === val ? 'selected' : ''}>${esc(l)}</option>`).join('')}</select>`;
   res.page('Tournois', `<section><h1>Tournois</h1>
   <form class="filters" method="get"><input name="q" placeholder="🔍 Rechercher…" value="${esc(q)}">
-  ${sel('jeu', jeu, Object.keys(GAMES).map(g => [g, g]))}${sel('plateforme', plateforme, PLATFORMS.map(p => [p, p]))}
+  ${sel('plateforme', plateforme, PLATFORMS.map(p => [p, p]))}
   ${sel('format', format, [['solo', 'Solo'], ['equipe', 'Équipe']])}${sel('statut', statut, [['ouvert', 'Ouvert'], ['complet', 'Complet'], ['ferme', 'Inscriptions closes'], ['en_cours', 'En cours'], ['termine', 'Terminé']])}
   <button class="btn sm">Filtrer</button><a href="/tournois" class="btn ghost sm">Réinitialiser</a></form>
   <p class="muted">${list.length} tournoi(s)</p><div class="grid">${list.map(card).join('') || `<p class="muted">${(jeu || plateforme || format || statut || q) ? 'Aucun tournoi ne correspond.' : 'Aucun tournoi pour le moment.'}</p>`}</div></section>`);
@@ -190,7 +189,7 @@ app.get('/profil', auth, (req, res) => {
 
 // ---------- Admin ----------
 app.get('/admin/tournois/nouveau', auth, admin, (req, res) => res.page('Créer un tournoi', `<section class="form-wrap wide"><h1>Créer un tournoi</h1><form method="post" action="/admin/tournois" class="form two">
-  <label class="full">Nom<input name="name" required maxlength="80"></label><label>Jeu<select name="game">${Object.keys(GAMES).map(g => `<option>${g}</option>`).join('')}</select></label>
+  <label class="full">Nom<input name="name" required maxlength="80"></label><input type="hidden" name="game" value="${GAME}"><label>Jeu<input value="${GAME}" disabled></label>
   <label>Plateforme<select name="platform">${platformOpts('PC')}</select></label><label>Format<select name="format"><option value="solo">Solo</option><option value="equipe">Équipe</option></select></label>
   <label>Joueurs par équipe<input type="number" name="team_size" min="1" max="10" value="1"></label><label>Nombre de places<input type="number" name="max_slots" min="2" max="256" value="16" required></label>
   <label>Cashprize<input name="cashprize" placeholder="500 €"></label><label>Début<input type="datetime-local" name="start_date" required></label><label>Clôture des inscriptions<input type="datetime-local" name="reg_close" required></label>
@@ -202,6 +201,7 @@ app.post('/admin/tournois', auth, admin, (req, res) => {
   const D = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/;
   const len = (v, n) => v == null || (typeof v === 'string' && v.length <= n);
   if (!len(b.name, 80) || !len(b.cashprize, 40) || !len(b.rules, 5000) || !len(b.description, 2000) || !D.test(b.start_date || '') || !D.test(b.reg_close || '')) { req.flash('err', 'Champs invalides (longueur ou format de date).'); return res.redirect(303, '/admin/tournois/nouveau'); }
+  b.game = GAME; // site mono-jeu
   if (!b.name || !GAMES[b.game] || !PLATFORMS.includes(b.platform) || !b.start_date || !b.reg_close) { req.flash('err', 'Champs invalides.'); return res.redirect(303, '/admin/tournois/nouveau'); }
   if (b.reg_close > b.start_date) { req.flash('err', 'La clôture doit précéder le début.'); return res.redirect(303, '/admin/tournois/nouveau'); }
   const id = db.prepare(`INSERT INTO tournaments(name,game,platform,format,team_size,max_slots,cashprize,start_date,reg_close,rules,description,created_by) VALUES(?,?,?,?,?,?,?,?,?,?,?,?)`)

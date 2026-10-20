@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS ranked_queue(user_id INTEGER PRIMARY KEY REFERENCES u
   joined_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')));
 `);
 
-const FORMAT = { 'Valorant': 5, 'League of Legends': 5, 'Rocket League': 3, 'EA FC': 1, 'Fortnite': 1, 'CS2': 5, 'Call of Duty': 4 };
+const FORMAT = { 'Call of Duty': 4 }; // classé CoD : 4v4, solo ou duo (2 max)
 const SPREAD0 = 200, SPREAD_STEP = 100, STEP_S = 30;
 const duoAllowed = g => FORMAT[g] > 1;
 const fmt = g => `${FORMAT[g]}v${FORMAT[g]}`;
