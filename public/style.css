@@ -135,3 +135,7 @@ td.up{color:var(--ok)}td.down{color:var(--err)}
 .feed{list-style:none;padding:0;margin:0}.feed li{padding:6px 0;border-bottom:1px solid var(--line)}
 .odds{width:100%}.odds td{padding:4px 6px}.odds td:last-child{text-align:right;color:var(--mut)}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
 .claim{border-color:#9146ff;margin:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}.claim.livre{border-color:var(--ok)}
+/* Page admin Anti-triche */
+.anticheat .ac-status{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:.6rem 0 1rem;padding:.7rem 1rem;border:1px solid rgba(0,240,255,.25);border-radius:12px;background:rgba(10,10,25,.6)}
+.anticheat .ac-status.ac-veille{border-color:rgba(255,200,0,.45)}.anticheat .ac-status.ac-down,.anticheat .ac-status.ac-err,.anticheat .ac-status.ac-config{border-color:rgba(255,61,129,.5)}
+.anticheat .ac-status .btn{margin-left:auto}
