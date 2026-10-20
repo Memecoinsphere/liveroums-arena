@@ -1,5 +1,6 @@
 #!/bin/bash
 # Test de bout en bout : inscription, connexion, inscription tournoi, doublon, capacité, désinscription
+# Démarrer le serveur avec NODE_ENV=test WHEEL_TEST_FORCE=1 (tirage forcé de la Roue, test uniquement) ; BASE_URL optionnel. Lancer depuis la racine du dépôt.
 B=${BASE_URL:-http://localhost:3000}; J=$(mktemp); P=0; F=0
 ok(){ if eval "$2"; then echo "✅ $1"; P=$((P+1)); else echo "❌ $1"; F=$((F+1)); fi; }
 U=testeur$RANDOM
@@ -148,4 +149,27 @@ ok "Boutique : déséquiper" 'q $HOST -L -d slot=color $B/boutique/desequiper | 
 ok "Admin : octroi refusé aux non-admins" '[ "$(q lp2$R -o /dev/null -w %{http_code} -d "pseudo=lp2$R&amount=999" $B/admin/points)" = 403 ]'
 ok "Admin : octroie 5000 LP puis achat légendaire" 'curl -s -b $A2 -L -d "pseudo=lp2$R&amount=5000&reason=Test" $B/admin/points | grep -q "+5000 LP" && q lp2$R -L -d item=banner_inferno $B/boutique/acheter | grep -q "Achat réussi" && [ "$(pj lp2$R "d[\"solde\"]")" = 2025 ]'
 ok "LP : historique des points" 'q lp2$R $B/points | grep -q "Achat boutique : Inferno" && q lp2$R $B/points | grep -q "Défis"'
+# ---------- Roue du jour ----------
+mk rw1$R; mk rw2$R
+ok "Roue : indicateur de tour gratuit dans la nav" 'q rw1$R $B/roue | grep -q "spin-dot"'
+ok "Roue : page /roue avec probabilités (Jackpot 1 %)" 'curl -s $B/roue | grep -q "JACKPOT 1000 LP" && curl -s $B/roue | grep -q "Sub Twitch 1 mois"'
+ok "Roue : tour gratuit (résultat serveur JSON, +100 LP au registre)" 'q rw1$R -H "Accept: application/json" -d force=lp100 $B/roue/tourner | grep -q "\"segment\":\"lp100\"" && pj rw1$R "d[\"historique\"]" | grep -q "Roue du jour : 100 LP"'
+ok "Roue : tirage forcé ignoré hors NODE_ENV=test (production)" 'node test-roue-guard.js >/dev/null 2>&1'
+# vider un éventuel tour bonus gagné, puis vérifier le refus
+for i in 1 2 3 4 5; do q rw1$R -o /dev/null -d x=1 $B/roue/tourner; done
+ok "Roue : 2e tour gratuit du jour refusé" 'q rw1$R -L -d x=1 $B/roue/tourner | grep -q "déjà utilisé ton tour gratuit"'
+ok "Roue : nav sans indicateur une fois le tour utilisé" '! q rw1$R $B/roue | grep -q "spin-dot"'
+ok "Roue : tour payant refusé sans points" 'q rw2$R -L -d x=1 $B/roue/payer | grep -q "un tour payant coûte 150 LP"'
+curl -s -b $A2 -o /dev/null -d "pseudo=rw2$R&amount=1000" $B/admin/points
+S1=$(pj rw2$R 'd["solde"]')
+ok "Roue : tour payant débite 150 LP" 'q rw2$R -o /dev/null -d x=1 $B/roue/payer; pj rw2$R "d[\"historique\"]" | grep -q "tour payant" && [ "$(pj rw2$R "sum(h[\"montant\"] for h in d[\"historique\"] if h[\"motif\"]==\"Roue du jour : tour payant\")")" = -150 ]'
+ok "Roue : max 3 tours payants par jour" 'q rw2$R -o /dev/null -d x=1 $B/roue/payer; q rw2$R -o /dev/null -d x=1 $B/roue/payer; q rw2$R -L -d x=1 $B/roue/payer | grep -q "Maximum 3 tours payants"'
+ok "Admin : /admin/lots refusé aux non-admins (403)" '[ "$(q rw2$R -o /dev/null -w %{http_code} $B/admin/lots)" = 403 ]'
+mk sub$R
+ok "Roue : lot Sub Twitch (tirage forcé en mode test) → lot à réclamer" 'q sub$R -L -d force=sub $B/roue/tourner | grep -q "Lot à réclamer — l.admin te contacte"'
+CID=$(q sub$R $B/roue | grep -o "/roue/lots/[0-9]*" | head -1 | grep -o "[0-9]*$")
+ok "Roue : le gagnant saisit son pseudo Twitch" 'q sub$R -L -d twitch=Gagnant_$R $B/roue/lots/$CID | grep -q "Pseudo Twitch enregistré"'
+ok "Admin : lot visible en attente sur /admin/lots" 'curl -s -b $A2 $B/admin/lots | grep -q "Gagnant_$R"'
+ok "Admin : marque le lot livré → visible par le gagnant" 'curl -s -b $A2 -L -d x=1 $B/admin/lots/$CID/livrer | grep -q "marqué comme livré" && q sub$R $B/roue | grep -q "Lot livré"'
+ok "Roue : gros gain affiché dans le fil" 'curl -s $B/roue | grep -q "Sub Twitch 1 mois</b>"'
 echo "Résultat : $P réussis, $F échoués"

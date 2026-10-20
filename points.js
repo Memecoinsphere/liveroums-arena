@@ -87,6 +87,10 @@ function checkChallenges(uid) {
 
 // Résultat d'un match (classé, partie rapide, privée, tournoi)
 const SRC = { classe: 'partie classée', rapide: 'partie rapide', privee: 'partie privée', tournoi: 'match de tournoi' };
+// Boost x2 (Roue du jour) : colonne ajoutée de façon idempotente
+for (const col of ['boost_until TEXT', 'bonus_spins INTEGER NOT NULL DEFAULT 0'])
+  if (!db.prepare('PRAGMA table_info(user_points)').all().some(c => c.name === col.split(' ')[0])) db.exec(`ALTER TABLE user_points ADD COLUMN ${col}`);
+const boostActive = uid => { const b = state(uid).boost_until; return !!b && b > new Date().toISOString(); };
 function recordMatch(winners, losers, source) {
   const label = SRC[source] || source;
   db.transaction(() => {
@@ -95,6 +99,7 @@ function recordMatch(winners, losers, source) {
       const firstToday = !db.prepare("SELECT 1 FROM match_log WHERE user_id=? AND won=1 AND created_at>=?").get(uid, utcStart(parisDay()));
       db.prepare('INSERT INTO match_log(user_id,won,source) VALUES(?,1,?)').run(uid, source);
       add(uid, PTS.WIN, `Victoire (${label})`);
+      if (boostActive(uid)) add(uid, PTS.WIN, 'Boost Roue du jour : victoire x2');
       if (firstToday) add(uid, PTS.FIRST_WIN_BONUS, 'Bonus première victoire du jour (x2)');
       db.prepare('UPDATE user_points SET win_streak=win_streak+1 WHERE user_id=?').run(uid);
       const s = state(uid).win_streak;
@@ -147,7 +152,7 @@ function deco(uid) {
   return d;
 }
 
-module.exports = { PTS, RARITY, SLOTS, ITEMS, ITEM, CHALLENGES, add, balance, state, level, progress, recordMatch, dailyLogin, buy, equip, unequip, deco, parisDay, periodKey };
+module.exports = { PTS, RARITY, SLOTS, ITEMS, ITEM, CHALLENGES, add, balance, state, level, progress, recordMatch, boostActive, dailyLogin, buy, equip, unequip, deco, parisDay, periodKey };
 
 // ---- Rendu des cosmétiques équipés ----
 const { esc } = require('./views');

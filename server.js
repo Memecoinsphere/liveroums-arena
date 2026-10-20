@@ -20,7 +20,7 @@ app.use(session({ secret: process.env.SESSION_SECRET || crypto.randomBytes(32).t
 app.use((req, res, next) => {
   B.autoGenerate();
   req.user = req.session.uid ? db.prepare('SELECT id,pseudo,email,platform,game_id,is_admin FROM users WHERE id=?').get(req.session.uid) : null;
-  if (req.user) { const d = P.dailyLogin(req.user.id); if (d) req.session.flash = req.session.flash || { type: 'ok', msg: `🎁 Bonus de connexion : +${d.total} LP (série de ${d.streak} jour${d.streak > 1 ? 's' : ''}) !` }; req.user.points = P.balance(req.user.id); }
+  if (req.user) { const d = P.dailyLogin(req.user.id); if (d) req.session.flash = req.session.flash || { type: 'ok', msg: `🎁 Bonus de connexion : +${d.total} LP (série de ${d.streak} jour${d.streak > 1 ? 's' : ''}) !` }; req.user.points = P.balance(req.user.id); req.user.spin = ROUE.canSpin(req.user.id); }
   res.page = (title, body) => { const f = req.session.flash; delete req.session.flash; res.send(layout(title, req.user, f, body)); };
   req.flash = (type, msg) => { req.session.flash = { type, msg }; };
   next();
@@ -32,6 +32,7 @@ const TQ = `SELECT t.*, (SELECT COUNT(*) FROM registrations r WHERE r.tournament
 const MMR = require('./routes-mm')(app, { auth, admin });
 require('./discord-oauth')(app, { auth });
 require('./routes-points')(app, { auth, admin });
+const ROUE = require('./roue')(app, { auth, admin });
 const M = require('./mm');
 const getT = id => db.prepare(TQ + ' WHERE t.id=?').get(id);
 
@@ -153,7 +154,7 @@ app.get('/profil', auth, (req, res) => {
   res.page('Mon profil', `<section>${P.bannerHtml(req.user.id)}<div class="profile">${P.avatarHtml(req.user.id, req.user.pseudo, db.prepare('SELECT discord_avatar FROM users WHERE id=?').get(req.user.id).discord_avatar)}<div>${P.h1Html(req.user.id, req.user.pseudo, req.user.is_admin ? '<span class="badge ex">Admin</span>' : '')}
   <p class="muted">${esc(req.user.email)} · ${esc(req.user.platform)} · ID de jeu : ${esc(req.user.game_id || '—')}</p></div></div>
   <p><a href="/joueurs/${encodeURIComponent(req.user.pseudo)}">Voir mon profil public →</a></p>
-  <h2>💎 Points LiveRoums</h2><div class="lp-stats"><div class="lp-wallet">💎 <b>${P.balance(req.user.id)}</b> LP</div>${P.levelHtml(req.user.id)}<div class="inline"><a class="btn sm" href="/boutique">🛒 Boutique</a><a class="btn ghost sm" href="/points">Historique & défis</a>${req.user.is_admin ? '<a class="btn ghost sm" href="/admin/points">Octroyer des LP</a>' : ''}</div></div>
+  <h2>💎 Points LiveRoums</h2><div class="lp-stats"><div class="lp-wallet">💎 <b>${P.balance(req.user.id)}</b> LP</div>${P.levelHtml(req.user.id)}<div class="inline"><a class="btn sm" href="/boutique">🛒 Boutique</a><a class="btn ghost sm" href="/points">Historique & défis</a>${req.user.is_admin ? '<a class="btn ghost sm" href="/admin/points">Octroyer des LP</a><a class="btn ghost sm" href="/admin/lots">Lots à livrer</a>' : ''}</div></div>
   <h2>Skill rating</h2><div class="sr-grid">${MMR.srTable(req.user.id)}</div>
   <h2>🔗 Comptes liés</h2>${MMR.linkedList(req.user.id)}
   <div class="link-forms panel"><div class="inline">${(() => { const u = db.prepare('SELECT discord_username, discord_global_name, discord_avatar FROM users WHERE id=?').get(req.user.id); const d = u.discord_username;
