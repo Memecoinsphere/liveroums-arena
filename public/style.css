@@ -119,3 +119,19 @@ footer{text-align:center;color:var(--mut);padding:30px;border-top:1px solid var(
 .challenges{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:12px}.challenge{display:flex;justify-content:space-between;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px}
 .challenge>div{flex:1}.challenge .bar{margin:6px 0}.challenge .bar i{background:linear-gradient(90deg,var(--neon),#ffd23f)}.challenge .reward{color:#ffd23f;font-weight:800;white-space:nowrap}.challenge.done{border-color:var(--ok)}
 td.up{color:var(--ok)}td.down{color:var(--err)}
+/* ---- Roue du jour ---- */
+.roue-link{position:relative}.spin-dot{position:absolute;top:-4px;right:-10px;width:9px;height:9px;border-radius:50%;background:var(--ok);box-shadow:0 0 10px var(--ok);animation:pulse 1.2s infinite}
+@keyframes pulse{50%{transform:scale(1.5);opacity:.5}}
+.roue-grid{display:grid;grid-template-columns:minmax(320px,1fr) minmax(280px,420px);gap:30px;align-items:start}@media(max-width:860px){.roue-grid{grid-template-columns:1fr}}
+.wheel-box{position:relative;width:min(460px,90vw);aspect-ratio:1;margin:10px auto}
+.wheel{width:100%;height:100%;border-radius:50%;position:relative;border:6px solid #fff2;box-shadow:0 0 40px #00f0ff88,0 0 80px #ff2bd655,inset 0 0 30px #0009;transition:transform 5s cubic-bezier(.12,.8,.12,1)}
+.wl{position:absolute;left:50%;top:0;width:0;height:50%;transform-origin:50% 100%}
+.wl b{position:absolute;top:18px;left:50%;transform:translateX(-50%);writing-mode:vertical-rl;font:800 12px Inter,sans-serif;color:#07070f;text-shadow:0 0 4px #fff8;white-space:nowrap;max-height:42%}
+.wl.big b{color:#fff;text-shadow:0 0 6px #000}
+.wheel-hub{position:absolute;inset:40%;border-radius:50%;background:radial-gradient(#141428,#07070f);border:3px solid var(--neon);display:grid;place-items:center;font-size:28px;box-shadow:0 0 20px var(--neon)}
+.wheel-pointer{position:absolute;top:-22px;left:50%;transform:translateX(-50%);z-index:2;font-size:34px;color:#ffd23f;text-shadow:0 0 14px #ffd23f}
+.spin-actions{display:flex;flex-direction:column;align-items:center;gap:10px;margin-top:16px}.spin-form{margin:0}.btn[disabled]{opacity:.4;cursor:not-allowed}
+.spin-result{text-align:center;font:800 22px Orbitron;color:#ffd23f;text-shadow:0 0 14px #ffd23f;min-height:30px;opacity:0;transition:.4s}.spin-result.show{opacity:1}
+.feed{list-style:none;padding:0;margin:0}.feed li{padding:6px 0;border-bottom:1px solid var(--line)}
+.odds{width:100%}.odds td{padding:4px 6px}.odds td:last-child{text-align:right;color:var(--mut)}.dot{display:inline-block;width:10px;height:10px;border-radius:50%}
+.claim{border-color:#9146ff;margin:10px 0;display:flex;gap:12px;align-items:center;flex-wrap:wrap}.claim.livre{border-color:var(--ok)}
