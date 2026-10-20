@@ -17,7 +17,7 @@ function layout(title, user, flash, body) {
 <title>${esc(title)} · LiveRoums Arena</title><link rel="stylesheet" href="/style.css"></head><body>
 <header class="nav"><a class="logo" href="/">⚡ LiveRoums<span>Arena</span></a>
 <input type="checkbox" id="burger" hidden><label for="burger" class="burger">☰</label>
-<nav><a href="/tournois">Tournois</a><a href="/matchmaking">Matchmaking</a><a href="/classement">Classement</a><a href="/boutique">Boutique</a><a href="/roue" class="roue-link">🎡 Roue${user?.spin ? '<i class="spin-dot" title="Tour gratuit disponible !"></i>' : ''}</a>${user?.is_admin ? '<a href="/admin/tournois/nouveau">+ Créer un tournoi</a><a href="/admin/export">📦 Export</a>' : ''}
+<nav><a href="/tournois">Tournois</a><a href="/matchmaking">Matchmaking</a><a href="/classement">Classement</a><a href="/boutique">Boutique</a><a href="/roue" class="roue-link">🎡 Roue${user?.spin ? '<i class="spin-dot" title="Tour gratuit disponible !"></i>' : ''}</a>${user?.is_admin ? '<a href="/admin/tournois/nouveau">+ Créer un tournoi</a><a href="/admin/export">📦 Export</a><a href="/admin/anti-triche">🛡️ Anti-triche</a>' : ''}
 ${user ? `<a href="/points" class="chip lp-chip" title="Points LiveRoums">💎 ${user.points ?? 0} LP</a><a href="/profil" class="chip">👤 ${esc(user.pseudo)}</a><form method="post" action="/deconnexion"><button class="btn ghost sm">Déconnexion</button></form>`
        : '<a href="/connexion">Connexion</a><a class="btn sm" href="/inscription">Créer un compte</a>'}</nav></header>
 ${flash ? `<div class="flash ${flash.type}">${esc(flash.msg)}</div>` : ''}

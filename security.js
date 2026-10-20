@@ -42,7 +42,7 @@ function headers(app) {
     contentSecurityPolicy: { useDefaults: false, directives: {
       'default-src': ["'self'"], 'script-src': ["'self'", (req, res) => `'nonce-${res.locals.nonce}'`], 'script-src-attr': ["'none'"],
       'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'], 'font-src': ["'self'", 'https://fonts.gstatic.com'],
-      'img-src': ["'self'", 'data:', 'https://cdn.discordapp.com'], 'connect-src': ["'self'"], 'object-src': ["'none'"], 'base-uri': ["'self'"],
+      'img-src': ["'self'", 'data:', 'https://cdn.discordapp.com'], 'connect-src': ["'self'"], 'frame-src': ["'self'", ...[require('./anticheat').agentOrigin()].filter(Boolean)], 'object-src': ["'none'"], 'base-uri': ["'self'"],
       'form-action': ["'self'"], 'frame-ancestors': ["'none'"], ...(PROD ? { 'upgrade-insecure-requests': [] } : {}) } },
     strictTransportSecurity: PROD ? { maxAge: 31536000, includeSubDomains: true } : false,
     referrerPolicy: { policy: 'strict-origin-when-cross-origin' }, frameguard: { action: 'deny' }, crossOriginEmbedderPolicy: false,
