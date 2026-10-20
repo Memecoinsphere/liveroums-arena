@@ -25,7 +25,7 @@ module.exports = (app, { auth, admin }) => {
   // ---------- Classement ----------
   app.get('/classement', (req, res) => {
     const game = GAMES[req.query.jeu] ? req.query.jeu : 'Valorant';
-    const rows = db.prepare(`SELECT u.pseudo, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? ORDER BY r.sr DESC LIMIT 100`).all(game);
+    const rows = db.prepare(`SELECT u.pseudo, r.* FROM ratings r JOIN users u ON u.id=r.user_id WHERE r.game=? AND r.wins + r.losses > 0 ORDER BY r.sr DESC LIMIT 100`).all(game);
     res.page('Classement', `<section><h1>🏅 Classement SR</h1>
     <div class="tabs">${Object.keys(GAMES).map(g => `<a class="${g === game ? 'active' : ''}" href="/classement?jeu=${encodeURIComponent(g)}">${GAMES[g].icon} ${esc(g)}</a>`).join('')}</div>
     <div class="tiers">${M.TIERS.map(([min, n, c]) => `<span class="rank" style="--rc:${c}">◆ ${n} <small>${min}+</small></span>`).join('')}</div>
@@ -109,7 +109,7 @@ module.exports = (app, { auth, admin }) => {
     ${s.lobby ? `<div class="ok-box">🎮 Tu es dans la partie <a href="/parties/${s.lobby.code}"><b class="code">${s.lobby.code}</b></a> (${s.lobby.status === 'attente' ? 'en attente' : 'en cours'}).</div>` : ''}
     <div class="mm-cols"><div><h2>Files d'attente</h2><div class="queue-grid">${cards}</div></div>
     <aside class="panel"><h3>🔒 Partie privée</h3>${req.user ? `<form method="post" action="/parties" class="stack"><select name="gm">${modeOpts()}</select><button class="btn">Créer une partie privée</button></form>
-    <h3>🔑 Rejoindre avec un code</h3><form method="post" action="/parties/rejoindre" class="stack"><input name="code" placeholder="EX : DEMO42" maxlength="6" class="code-input" required><button class="btn ghost">Rejoindre</button></form>`
+    <h3>🔑 Rejoindre avec un code</h3><form method="post" action="/parties/rejoindre" class="stack"><input name="code" placeholder="EX : AB12CD" maxlength="6" class="code-input" required><button class="btn ghost">Rejoindre</button></form>`
       : '<p><a href="/connexion?next=/matchmaking">Connecte-toi</a> pour jouer.</p>'}
     <h3>📡 Live</h3><p class="muted">${s.live} partie(s) en cours</p></aside></div></section>${poll('/api/matchmaking', s.v, 'partie')}`);
   });

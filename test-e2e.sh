@@ -4,6 +4,22 @@ B=http://localhost:3000; J=$(mktemp); P=0; F=0
 ok(){ if eval "$2"; then echo "✅ $1"; P=$((P+1)); else echo "❌ $1"; F=$((F+1)); fi; }
 U=testeur$RANDOM
 c(){ curl -s -b $J -c $J "$@"; }
+# Base vierge : vérification des états vides, puis l'admin crée les tournois utilisés par les tests
+ok "Liste tournois vide (état vide)" 'curl -s $B/tournois | grep -q "Aucun tournoi pour le moment"'
+ok "Accueil : 0 tournoi" 'curl -s $B/ | grep -q "<b>0</b><span>tournois"'
+ok "Classement vide (état vide)" 'curl -s "$B/classement?jeu=Valorant" | grep -q "Aucun joueur classé"'
+A=$(mktemp); curl -s -c $A -b $A -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
+D(){ date -d "$1" +%Y-%m-%dT%H:%M; }
+mkT(){ curl -s -c $A -b $A -o /dev/null -w %{redirect_url} --data-urlencode "name=$1" -d "$2" $B/admin/tournois | grep -o "[0-9]*$"; }
+TE=$(mkT "Valorant Cup $RANDOM" "game=Valorant&platform=PC&format=equipe&team_size=5&max_slots=16&start_date=$(D '+10 days')&reg_close=$(D '+8 days')")
+TR=$(mkT "RL Duo $RANDOM" "game=Rocket+League&platform=Multiplateforme&format=equipe&team_size=2&max_slots=16&start_date=$(D '+5 days')&reg_close=$(D '+4 days')")
+TF=$(mkT "EA FC League $RANDOM" "game=EA+FC&platform=PlayStation&format=solo&max_slots=8&start_date=$(D '+3 days')&reg_close=$(D '+2 days')")
+TC=$(mkT "CS2 Open $RANDOM" "game=CS2&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '+12 hours')")
+TX=$(mkT "Fortnite Clos $RANDOM" "game=Fortnite&platform=PC&format=solo&max_slots=8&start_date=$(D '+1 day')&reg_close=$(D '-1 day')")
+ok "Admin crée les tournois de test" '[ -n "$TE" ] && [ -n "$TR" ] && [ -n "$TF" ] && [ -n "$TC" ] && [ -n "$TX" ]'
+# 4 joueurs inscrits au CS2 puis bracket généré par l'admin
+for i in 1 2 3 4; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=c$i$U&email=c$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TC/inscription; done
+curl -s -c $A -b $A -o /dev/null -d x=1 $B/admin/tournois/$TC/bracket
 ok "Accueil 200" '[ "$(curl -s -o /dev/null -w %{http_code} $B/)" = 200 ]'
 ok "Création de compte → /profil" '[ "$(c -o /dev/null -w %{redirect_url} -d "pseudo=$U&email=$U@test.gg&password=MotDePasse1&platform=PC&game_id=$U%231" $B/inscription)" = "$B/profil" ]'
 ok "Profil affiche le pseudo" 'c $B/profil | grep -q "$U"'
@@ -11,23 +27,22 @@ ok "Compte en double refusé" 'c -L -d "pseudo=$U&email=$U@test.gg&password=MotD
 c -X POST $B/deconnexion -o /dev/null
 ok "Mauvais mot de passe refusé" 'c -L -d "login=$U&password=faux" $B/connexion | grep -q "Identifiants incorrects"'
 ok "Connexion OK" '[ "$(c -o /dev/null -w %{redirect_url} -d "login=$U@test.gg&password=MotDePasse1" $B/connexion)" = "$B/profil" ]'
-ok "Inscription solo EA FC (#4)" 'c -L -d rules=on $B/tournois/4/inscription | grep -q "Inscription confirmée"'
-ok "Double inscription refusée" 'c -L -d rules=on $B/tournois/4/inscription | grep -q "déjà inscrit"'
-ok "Inscription équipe Valorant (#1)" 'c -L -d "rules=on&team_name=Team_$U&mates=A&mates=B&mates=C&mates=D" $B/tournois/1/inscription | grep -q "Team_$U"'
-ok "Équipe incomplète refusée (Rocket League #3)" 'c -L -d "rules=on&team_name=X$U" $B/tournois/3/inscription | grep -q "exactement 1"'
-ok "Inscription refusée sur tournoi clos (CS2 #6)" 'c -L -d rules=on $B/tournois/6/inscription | grep -q "fermées"'
+ok "Inscription solo EA FC " 'c -L -d rules=on $B/tournois/$TF/inscription | grep -q "Inscription confirmée"'
+ok "Double inscription refusée" 'c -L -d rules=on $B/tournois/$TF/inscription | grep -q "déjà inscrit"'
+ok "Inscription équipe Valorant" 'c -L -d "rules=on&team_name=Team_$U&mates=A&mates=B&mates=C&mates=D" $B/tournois/$TE/inscription | grep -q "Team_$U"'
+ok "Équipe incomplète refusée (Rocket League)" 'c -L -d "rules=on&team_name=X$U" $B/tournois/$TR/inscription | grep -q "exactement 1"'
+ok "Inscription refusée sur tournoi clos" 'c -L -d rules=on $B/tournois/$TX/inscription | grep -q "fermées"'
 ok "Profil liste 2 tournois" 'c $B/profil | grep -q "Mes tournois (2)"'
 # Remplir EA FC (8 places) avec d'autres comptes, puis vérifier le refus
-for i in 1 2 3; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=f$i$U&email=f$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/4/inscription; done
+for i in 1 2 3 4 5 6 7; do K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=f$i$U&email=f$i$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription; curl -s -c $K -b $K -o /dev/null -d rules=on $B/tournois/$TF/inscription; done
 K=$(mktemp); curl -s -c $K -b $K -o /dev/null -d "pseudo=x$U&email=x$U@t.gg&password=MotDePasse1&platform=PC" $B/inscription
-ok "Capacité : 9e joueur refusé (complet)" 'curl -s -c $K -b $K -L -d rules=on $B/tournois/4/inscription | grep -q "complet"'
-ok "Désinscription EA FC" 'c -L -d x=1 $B/tournois/4/desinscription | grep -q "désinscrit"'
+ok "Capacité : 9e joueur refusé (complet)" 'curl -s -c $K -b $K -L -d rules=on $B/tournois/$TF/inscription | grep -q "complet"'
+ok "Désinscription EA FC" 'c -L -d x=1 $B/tournois/$TF/desinscription | grep -q "désinscrit"'
 ok "Profil liste 1 tournoi" 'c $B/profil | grep -q "Mes tournois (1)"'
 ok "Non-admin refusé sur création" '[ "$(c -o /dev/null -w %{http_code} $B/admin/tournois/nouveau)" = 403 ]'
-A=$(mktemp); curl -s -c $A -b $A -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
 ok "Admin crée un tournoi" 'curl -s -c $A -b $A -L -d "name=Test+Cup&game=CS2&platform=PC&format=solo&max_slots=4&cashprize=50&start_date=2030-01-02T20:00&reg_close=2030-01-01T20:00" $B/admin/tournois | grep -q "Tournoi publié"'
-ok "Admin génère bracket EA FC" 'curl -s -c $A -b $A -L -d x=1 $B/admin/tournois/4/bracket | grep -q "Demi-finales"'
-ok "Bracket auto CS2 (clôturé) affiché" 'curl -s $B/tournois/6 | grep -q "Finale"'
+ok "Admin génère bracket EA FC" 'curl -s -c $A -b $A -L -d x=1 $B/admin/tournois/$TF/bracket | grep -q "Demi-finales"'
+ok "Bracket CS2 affiché" 'curl -s $B/tournois/$TC | grep -q "Finale"'
 ok "Filtre jeu=Valorant" '[ "$(curl -s "$B/tournois?jeu=Valorant" | grep -o "class=\"card\"" | wc -l)" = 1 ]'
 ok "Filtre format=solo&statut=en_cours" 'curl -s "$B/tournois?format=solo&statut=en_cours" | grep -q "CS2 Open"'
 
@@ -36,7 +51,7 @@ js(){ curl -s "$B/api/joueurs/$1" | python3 -c "import sys,json;d=json.load(sys.
 mk(){ local j=/tmp/mm_$1; rm -f $j; curl -s -c $j -b $j -o /dev/null -d "pseudo=$1&email=$1@t.gg&password=MotDePasse1&platform=PC" $B/inscription; }
 R=$RANDOM; for n in 1 2 3 4 5; do mk q$n$R; done
 q(){ curl -s -c /tmp/mm_$1 -b /tmp/mm_$1 "${@:2}"; }
-ok "Classement 200 + rangs" 'curl -s "$B/classement?jeu=CS2" | grep -q "Légende\|Maître\|Diamant"'
+ok "Classement vide au départ (état vide)" 'curl -s "$B/classement?jeu=Valorant" | grep -q "Aucun joueur classé"'
 ok "Lier un compte Riot (non vérifié)" 'c -L -d "provider=riot&account_id=Test%23EUW" $B/profil/comptes | grep -q "non vérifié"'
 ok "Comptes liés visibles sur profil public" 'curl -s $B/joueurs/$U | grep -q "Test#EUW"'
 ok "Steam OpenID redirige vers steamcommunity" 'c -o /dev/null -w %{redirect_url} $B/auth/steam | grep -q "steamcommunity.com/openid/login.*checkid_setup"'
@@ -62,9 +77,9 @@ CODE=$(q q4$R -o /dev/null -w %{redirect_url} -d "gm=Rocket League|1v1" $B/parti
 ok "Partie privée créée avec code" '[ ${#CODE} = 6 ] && curl -s $B/api/parties/$CODE | grep -q "\"statut\":\"attente\""'
 ok "Code invalide refusé" 'q q5$R -L -d code=ZZZZZZ $B/parties/rejoindre | grep -q "introuvable"'
 ok "Rejoindre par code → partie complète démarrée" '[ "$(q q5$R -o /dev/null -w %{redirect_url} -d code=${CODE,,} $B/parties/rejoindre)" = "$B/parties/$CODE" ] && curl -s $B/api/parties/$CODE | grep -q "en_cours"'
-ok "Lobby d'exemple DEMO42 affiché" 'curl -s $B/parties/DEMO42 | grep -q "DEMO42"'
 A2=$(mktemp); curl -s -c $A2 -b $A2 -o /dev/null -d "login=admin@liveroums.gg&password=Admin123!" $B/connexion
-M1=$(curl -s -b $A2 $B/tournois/6 | grep -o "/admin/tournois/6/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/6 | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
-SRW=$(js $W 'd["ratings"]["CS2"]'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
+M1=$(curl -s -b $A2 $B/tournois/$TC | grep -o "/admin/tournois/$TC/match/[0-9]*" | head -1); W=$(curl -s -b $A2 $B/tournois/$TC | grep -o "action=\"$M1\"><input type=\"hidden\" name=\"winner\" value=\"[^\"]*\"" | head -1 | sed 's/.*value="//;s/"$//')
+SRW=$(js $W 'd["ratings"].get("CS2",1000)'); curl -s -b $A2 -o /dev/null -d "winner=$W" $B$M1
 ok "Match de tournoi → SR du vainqueur mis à jour" '[ "$(js $W "d[\"ratings\"][\"CS2\"]")" -gt "$SRW" ]'
+ok "Classement Fortnite liste le joueur après sa partie" 'curl -s "$B/classement?jeu=Fortnite" | grep -q "$HOST"'
 echo "Résultat : $P réussis, $F échoués"

@@ -25,7 +25,7 @@ ${user ? `<a href="/profil" class="chip">👤 ${esc(user.pseudo)}</a><form metho
        : '<a href="/connexion">Connexion</a><a class="btn sm" href="/inscription">Créer un compte</a>'}</nav></header>
 ${flash ? `<div class="flash ${flash.type}">${esc(flash.msg)}</div>` : ''}
 <main>${body}</main>
-<footer><p>⚡ LiveRoums Arena — plateforme de tournois esport. Les tournois marqués <b>[EXEMPLE]</b> sont des données de démonstration.</p></footer></body></html>`;
+<footer><p>⚡ LiveRoums Arena — plateforme de tournois esport.</p></footer></body></html>`;
 }
 function card(t) {
   const g = GAMES[t.game] || { icon: '🎮', color: '#00f0ff' }; const s = status(t);

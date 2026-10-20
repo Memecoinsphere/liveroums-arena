@@ -42,8 +42,8 @@ app.get('/', (req, res) => {
   <h1>Entre dans l'<span class="neon">arène</span>.<br>Grimpe le <span class="neon2">bracket</span>.</h1>
   <p class="lead">Tournois Valorant, LoL, Rocket League, EA FC, Fortnite, CS2, Call of Duty… Inscris-toi en solo ou avec ton équipe, suis le bracket en direct et décroche le cashprize.</p>
   <div class="cta"><a class="btn lg" href="/tournois">Voir les tournois</a>${req.user ? '' : '<a class="btn ghost lg" href="/inscription">Créer mon compte</a>'}</div>
-  <div class="stats"><div><b>${all.length}</b><span>tournois</span></div><div><b>${db.prepare('SELECT COUNT(*) c FROM users').get().c}</b><span>joueurs</span></div><div><b>${all.filter(t => status(t).key === 'ouvert').length}</b><span>inscriptions ouvertes</span></div></div></section>
-  <section><div class="sec-head"><h2>🔥 Tournois à la une</h2><a href="/tournois">Tout voir →</a></div><div class="grid">${featured.map(card).join('') || '<p class="muted">Aucun tournoi ouvert.</p>'}</div></section>
+  <div class="stats"><div><b>${all.length}</b><span>tournois</span></div><div><b>${db.prepare('SELECT COUNT(*) c FROM users WHERE is_admin=0').get().c}</b><span>joueurs</span></div><div><b>${all.filter(t => status(t).key === 'ouvert').length}</b><span>inscriptions ouvertes</span></div></div></section>
+  <section><div class="sec-head"><h2>🔥 Tournois à la une</h2><a href="/tournois">Tout voir →</a></div><div class="grid">${featured.map(card).join('') || `<p class="muted">${all.length ? 'Aucun tournoi ouvert.' : 'Aucun tournoi pour le moment.'}</p>`}</div></section>
   <section><h2>🎮 Jeux populaires</h2><div class="games">${games.map(g => `<a class="game" style="--gc:${g.color}" href="/tournois?jeu=${encodeURIComponent(g.g)}"><span>${g.icon}</span><b>${esc(g.g)}</b><small>${g.n} tournoi(s)</small></a>`).join('')}</div></section>
   <section class="how"><h2>Comment ça marche ?</h2><div class="steps"><div><b>1</b><h4>Crée ton compte</h4><p>Pseudo, plateforme et ID de jeu.</p></div><div><b>2</b><h4>Inscris-toi</h4><p>En solo, ou crée ton équipe et ajoute tes coéquipiers.</p></div><div><b>3</b><h4>Joue le bracket</h4><p>Élimination directe générée automatiquement.</p></div></div></section>`);
 });
@@ -61,7 +61,7 @@ app.get('/tournois', (req, res) => {
   ${sel('jeu', jeu, Object.keys(GAMES).map(g => [g, g]))}${sel('plateforme', plateforme, PLATFORMS.map(p => [p, p]))}
   ${sel('format', format, [['solo', 'Solo'], ['equipe', 'Équipe']])}${sel('statut', statut, [['ouvert', 'Ouvert'], ['complet', 'Complet'], ['ferme', 'Inscriptions closes'], ['en_cours', 'En cours'], ['termine', 'Terminé']])}
   <button class="btn sm">Filtrer</button><a href="/tournois" class="btn ghost sm">Réinitialiser</a></form>
-  <p class="muted">${list.length} tournoi(s)</p><div class="grid">${list.map(card).join('') || '<p class="muted">Aucun tournoi ne correspond.</p>'}</div></section>`);
+  <p class="muted">${list.length} tournoi(s)</p><div class="grid">${list.map(card).join('') || `<p class="muted">${(jeu || plateforme || format || statut || q) ? 'Aucun tournoi ne correspond.' : 'Aucun tournoi pour le moment.'}</p>`}</div></section>`);
 });
 
 // ---------- Détail ----------
