@@ -56,6 +56,8 @@ CREATE TABLE IF NOT EXISTS queue(user_id INTEGER PRIMARY KEY REFERENCES users(id
 if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'discord_id')) {
   db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT'); db.exec('ALTER TABLE users ADD COLUMN discord_username TEXT');
 }
+for (const col of ['discord_global_name', 'discord_avatar'])
+  if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} TEXT`);
 db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS ux_users_discord ON users(discord_id) WHERE discord_id IS NOT NULL;
 CREATE TABLE IF NOT EXISTS events(id INTEGER PRIMARY KEY, type TEXT NOT NULL, payload TEXT NOT NULL, created_at TEXT DEFAULT CURRENT_TIMESTAMP, processed_at TEXT);`);
 db.emit = (type, payload = {}) => db.prepare('INSERT INTO events(type,payload) VALUES(?,?)').run(type, JSON.stringify(payload));
