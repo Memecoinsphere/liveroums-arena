@@ -54,6 +54,10 @@ CREATE TABLE IF NOT EXISTS queue(user_id INTEGER PRIMARY KEY REFERENCES users(id
   joined_at TEXT DEFAULT (strftime('%Y-%m-%d %H:%M:%f','now')));
 `);
 
+// ---- Map de partie (optionnel, ex. Café MW4) ----
+if (!db.prepare('PRAGMA table_info(lobbies)').all().some(c => c.name === 'map'))
+  db.exec('ALTER TABLE lobbies ADD COLUMN map TEXT');
+
 // ---- Discord : identifiant lié + file d'événements (outbox) lue par le bot ----
 if (!db.prepare('PRAGMA table_info(users)').all().some(c => c.name === 'discord_id')) {
   db.exec('ALTER TABLE users ADD COLUMN discord_id TEXT'); db.exec('ALTER TABLE users ADD COLUMN discord_username TEXT');

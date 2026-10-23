@@ -256,4 +256,14 @@ ok "Export API : désactivée (404) sans ANTICHEAT_EXPORT_TOKEN" '[ "$(command c
 ok "Anti-triche : lien 🛡️ admin seulement (nav + profil), absent pour un joueur et déconnecté" 'curl -s -b $A2 $B/profil | grep -c "href=\"/admin/anti-triche\"" | grep -q 2 && ! q sec2$R $B/profil | grep -q "/admin/anti-triche" && ! command curl -s $B/ | grep -q "/admin/anti-triche"'
 ok "Anti-triche : joueur → 403, déconnecté → redirection /connexion" '[ "$(q sec2$R -o /dev/null -w %{http_code} $B/admin/anti-triche)" = 403 ] && [ "$(command curl -s -o /dev/null -w %{http_code} $B/admin/anti-triche)" = 303 ] && command curl -s -o /dev/null -w %{redirect_url} $B/admin/anti-triche | grep -q "/connexion"'
 ok "Anti-triche : CSP frame-src autorise uniquement l agent, frame-ancestors du site inchangé" 'command curl -s -D - -o /dev/null $B/ | grep -i "^content-security-policy" | grep -q "frame-src .self. https://liveroums-anticheat.onrender.com;.*frame-ancestors .none."'
+
+# ---------- Simulation admin 4v4 · Café ----------
+ok "Simu : page /admin/simulation admin OK, joueur 403" 'curl -s -b $A2 $B/admin/simulation | grep -q "Lancer la simu 4v4" && [ "$(q sec2$R -o /dev/null -w %{http_code} $B/admin/simulation)" = 403 ]'
+SIM=$(curl -s -b $A2 -o /dev/null -w %{redirect_url} -d x=1 $B/admin/simulation | grep -o "[A-Z0-9]\{6\}$")
+ok "Simu : POST crée une partie 4v4 Café (8 joueurs)" '[ ${#SIM} = 6 ] && [ "$(api $SIM "len(d[\"joueurs\"])")" = 8 ] && [ "$(api $SIM "d[\"map\"]")" = Café ] && [ "$(api $SIM "d[\"statut\"]")" = en_cours ] && [ "$(api $SIM "d[\"classe\"]")" = False ]'
+ok "Simu : page lobby badge map Café + équipes Alpha/Bravo" 'curl -s $B/parties/$SIM | grep -q "🗺 Café" && curl -s $B/parties/$SIM | grep -q "Équipe Alpha" && curl -s $B/parties/$SIM | grep -q "Équipe Bravo" && curl -s $B/parties/$SIM | grep -q "SimAlpha1" && curl -s $B/parties/$SIM | grep -q "SimBravo4"'
+ok "Simu : non-admin POST refusé" '[ "$(q sec2$R -o /dev/null -w %{http_code} -d x=1 $B/admin/simulation)" = 403 ]'
+SIM2=$(curl -s -b $A2 -o /dev/null -w %{redirect_url} -d x=1 $B/admin/simulation | grep -o "[A-Z0-9]\{6\}$")
+ok "Simu : rejouable (2e run, nouveau code, toujours 8 joueurs Café)" '[ ${#SIM2} = 6 ] && [ "$SIM2" != "$SIM" ] && [ "$(api $SIM2 "len(d[\"joueurs\"])")" = 8 ] && [ "$(api $SIM2 "d[\"map\"]")" = Café ]'
+
 echo "Résultat : $P réussis, $F échoués"

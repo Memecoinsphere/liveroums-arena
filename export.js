@@ -39,7 +39,7 @@ function build({ since = null, mode = 'api' } = {}) {
   const lobbies = db.prepare(`SELECT l.*,h.pseudo host FROM lobbies l LEFT JOIN users h ON h.id=l.host_id WHERE COALESCE(l.ended_at,l.created_at)>=? ORDER BY l.id`).all(S);
   const lp = db.prepare('SELECT lp.*,u.pseudo,qm.quatuor_id FROM lobby_players lp JOIN users u ON u.id=lp.user_id LEFT JOIN quatuor_members qm ON qm.user_id=lp.user_id WHERE lp.lobby_id=? ORDER BY lp.team,u.pseudo');
   const matches = lobbies.map(l => ({ code: l.code, kind: kind(l), ranked: l.ranked ? 1 : 0, is_private: l.is_private ? 1 : 0, mode: l.mode, team_size: l.team_size,
-    status: l.status, winner_team: l.winner_team, host: l.host, started_at: iso(l.created_at), ended_at: iso(l.ended_at),
+    map: l.map || null, status: l.status, winner_team: l.winner_team, host: l.host, started_at: iso(l.created_at), ended_at: iso(l.ended_at),
     players: lp.all(l.id).map(p => ({ pseudo: p.pseudo, team: p.team, sr_before: p.sr_before, sr_after: p.sr_after, quatuor_id: p.quatuor_id ?? null })) }));
   const points = db.prepare('SELECT l.id,u.pseudo,l.amount,l.reason,l.created_at FROM points_ledger l JOIN users u ON u.id=l.user_id WHERE l.created_at>=? ORDER BY l.id').all(S)
     .map(r => ({ ...r, created_at: iso(r.created_at) }));
@@ -70,7 +70,7 @@ const toCsv = (cols, rows) => '\ufeff' + [cols.join(','), ...rows.map(r => cols.
 const DATASETS = {
   joueurs: { label: 'Joueurs', f: d => toCsv(['id', 'pseudo', 'platform', 'created_at', 'member_since', 'sr', 'wins', 'losses', 'lp_balance', 'xp', 'is_admin', 'quatuor_id', 'discord_id_hash', 'game_id', 'email'], d.players) },
   comptes_lies: { label: 'Comptes liés', f: d => toCsv(['pseudo', 'provider', 'account_id', 'verified', 'linked_at'], d.players.flatMap(p => p.linked.map(l => ({ pseudo: p.pseudo, ...l })))) },
-  parties: { label: 'Parties', f: d => toCsv(['code', 'kind', 'mode', 'team_size', 'status', 'winner_team', 'host', 'started_at', 'ended_at'], d.matches) },
+  parties: { label: 'Parties', f: d => toCsv(['code', 'kind', 'mode', 'team_size', 'map', 'status', 'winner_team', 'host', 'started_at', 'ended_at'], d.matches) },
   participations: { label: 'Participations', f: d => toCsv(['code', 'kind', 'status', 'winner_team', 'host', 'started_at', 'ended_at', 'pseudo', 'team', 'sr_before', 'sr_after', 'quatuor_id'], d.matches.flatMap(m => m.players.map(p => ({ ...m, ...p })))) },
   points: { label: 'Registre des points LP', f: d => toCsv(['id', 'pseudo', 'amount', 'reason', 'created_at'], d.points) },
   tournois: { label: 'Tournois (inscriptions)', f: d => toCsv(['id', 'name', 'game', 'platform', 'format', 'team_size', 'max_slots', 'start_date', 'finished', 'created_at', 'pseudo', 'team', 'registered_at'], d.tournaments.flatMap(t => (t.registrations.length ? t.registrations : [{}]).map(r => ({ ...t, pseudo: r.pseudo, team: r.team, registered_at: r.created_at })))) },

@@ -1,4 +1,6 @@
 // Routes : classement, profils publics, comptes liés (Steam OpenID), matchmaking & parties
+const fs = require('fs');
+const path = require('path');
 const db = require('./db');
 const M = require('./mm');
 const R = require('./ranked');
@@ -182,7 +184,7 @@ module.exports = (app, { auth, admin }) => {
   app.get('/api/parties/:code', (req, res) => {
     const s = lobbyState(req.params.code); if (!s) return res.status(404).json({});
     const next = req.user && s.l.status === 'termine' ? M.activeLobby(req.user.id) : null;
-    res.json({ v: s.v, code: s.l.code, classe: !!s.l.ranked, statut: s.l.status, equipe_gagnante: s.l.winner_team, joueurs: s.ps.map(p => ({ pseudo: p.pseudo, equipe: p.team, sr_avant: p.sr_before, sr_apres: p.sr_after })),
+    res.json({ v: s.v, code: s.l.code, classe: !!s.l.ranked, statut: s.l.status, map: s.l.map || null, equipe_gagnante: s.l.winner_team, joueurs: s.ps.map(p => ({ pseudo: p.pseudo, equipe: p.team, sr_avant: p.sr_before, sr_apres: p.sr_after })),
       prochaine: next && next.status === 'en_cours' ? `/parties/${next.code}` : null });
   });
   app.get('/parties/:code', (req, res) => {
@@ -197,8 +199,12 @@ module.exports = (app, { auth, admin }) => {
     const team = t => `<div class="team-box ${l.winner_team === t ? 'win' : l.winner_team ? 'lose' : ''}"><h3>Équipe ${t === 1 ? 'Alpha' : 'Bravo'} ${l.winner_team === t ? '🏆' : ''}</h3><p class="muted sm">SR moyen ${avg(t)}</p><ul>${ps.filter(p => p.team === t).map(pl).join('') || '<li class="muted">—</li>'}</ul>
       ${isHost && l.status === 'en_cours' ? `<form method="post" action="/parties/${l.code}/resultat"><input type="hidden" name="winner" value="${t}"><button class="btn sm">Victoire Équipe ${t === 1 ? 'Alpha' : 'Bravo'}</button></form>` : ''}</div>`;
     const waiting = ps.filter(p => !p.team);
-    res.page(`Partie ${l.code}`, `<section class="lobby" style="--gc:${g.color}"><div class="dhead"><span class="gicon xl">${g.icon}</span><div><span class="badge ${ST[0]}">${ST[1]}</span> <span class="badge ${l.ranked ? 'classe' : 'ex'}">${l.ranked ? '🏆 Classé' : l.is_private ? 'Privée · sans SR' : 'Partie rapide · sans SR'}</span>
-    <h1>${esc(l.game)} · ${l.mode}</h1><p>Code de la partie : <b class="code big">${l.code}</b></p></div></div>
+    const mapBadge = l.map ? ` <span class="badge map">🗺 ${esc(l.map)}</span>` : '';
+    const slug = l.map ? M.mapSlug(l.map) : '';
+    const mapImgPath = slug && ['jpg', 'jpeg', 'webp', 'png'].map(ext => path.join(__dirname, 'public', 'maps', `${slug}.${ext}`)).find(f => fs.existsSync(f));
+    const mapImg = mapImgPath ? `<figure class="map-thumb"><img src="/maps/${esc(path.basename(mapImgPath))}" alt="Carte ${esc(l.map)}" width="320" height="180" loading="lazy"></figure>` : '';
+    res.page(`Partie ${l.code}`, `<section class="lobby" style="--gc:${g.color}"><div class="dhead"><span class="gicon xl">${g.icon}</span><div><span class="badge ${ST[0]}">${ST[1]}</span> <span class="badge ${l.ranked ? 'classe' : 'ex'}">${l.ranked ? '🏆 Classé' : l.is_private ? 'Privée · sans SR' : 'Partie rapide · sans SR'}</span>${mapBadge}
+    <h1>${esc(l.game)} · ${l.mode}</h1><p>Code de la partie : <b class="code big">${l.code}</b></p>${mapImg}</div></div>
     ${l.status === 'attente' ? `<div class="panel"><h3>Salle d'attente (${ps.length} / ${2 * l.team_size})</h3><ul class="entrants">${waiting.map(pl).join('')}</ul>
       <p class="muted">Partage le code <b class="code">${l.code}</b> : la partie démarre automatiquement quand elle est complète (équipes équilibrées par SR).</p>
       ${!inLobby && req.user ? `<form method="post" action="/parties/rejoindre"><input type="hidden" name="code" value="${l.code}"><button class="btn">Rejoindre</button></form>` : ''}
@@ -220,5 +226,24 @@ module.exports = (app, { auth, admin }) => {
     catch (e) { req.flash('err', e.message); }
     res.redirect(303, `/parties/${l.code}`);
   });
+
+  // ---------- Simulation admin : 4v4 Café (8 bots) ----------
+  app.get('/admin/simulation', auth, admin, (req, res) => {
+    res.page('Simulation', `<section class="form-wrap"><h1>🎮 Simulation de partie</h1>
+    <p>Crée une partie démo <b>Call of Duty 4v4</b> en cours sur la map <b>Café</b> (8 joueurs fictifs SimAlpha / SimBravo). Rejouable après chaque redeploy (base Render éphémère).</p>
+    <form method="post" action="/admin/simulation"><button class="btn lg">Lancer la simu 4v4 · Café</button></form>
+    <p class="muted sm">Les comptes bots utilisent les e-mails sim1@…sim8@liveroums.gg (mot de passe interne, hors matchmaking public).</p></section>`);
+  });
+  app.post('/admin/simulation', auth, admin, (req, res) => {
+    try {
+      const code = M.createSim4v4Cafe();
+      req.flash('ok', `Simulation 4v4 · Café créée (${code}).`);
+      res.redirect(303, `/parties/${code}`);
+    } catch (e) {
+      req.flash('err', e.message || 'Échec de la simulation.');
+      res.redirect(303, '/admin/simulation');
+    }
+  });
+
   return { rank, srTable, linkedList, PROVIDERS };
 };

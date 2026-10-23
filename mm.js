@@ -7,6 +7,9 @@ const TIERS = [[0, 'Bronze', '#cd7f32'], [900, 'Argent', '#c0c8d8'], [1050, 'Or'
   [1350, 'Diamant', '#5aa9ff'], [1500, 'Maître', '#c04bff'], [1700, 'Légende', '#ff3d6e']];
 const tier = sr => { let t = TIERS[0]; for (const x of TIERS) if (sr >= x[0]) t = x; return { name: t[1], color: t[2], min: t[0] }; };
 const MODES = { 'Call of Duty': ['4v4', '2v2', '1v1'] }; // seul jeu supporté
+// Maps MW4 (noms pour affichage / simu ; image optionnelle dans public/maps/<slug>.jpg)
+const MAPS = { 'Call of Duty': ['Café', 'Shipment', 'Library', 'Kill Block', 'Smuggler'] };
+const mapSlug = name => ({ 'Café': 'cafe', Shipment: 'shipment', Library: 'library', 'Kill Block': 'kill-block', Smuggler: 'smuggler' }[name] || String(name).toLowerCase().replace(/[^a-z0-9]+/g, '-'));
 const teamSize = mode => parseInt(mode, 10);
 
 function getSR(uid, game) {
@@ -125,4 +128,48 @@ function declareResult(lid, winnerTeam) {
   next = tryMatch(l.game, l.mode);
   return next;
 }
-module.exports = { TIERS, tier, MODES, START, getSR, applyResult, tournamentResult, joinQueue, createPrivate, joinByCode, startLobby, declareResult, activeLobby, tryMatch, teamSize };
+
+// Simulation admin : partie démo 4v4 en cours, map Café, 8 bots (rejouable après redeploy)
+function createSim4v4Cafe() {
+  const bcrypt = require('bcrypt');
+  if (!db.prepare('PRAGMA table_info(lobbies)').all().some(c => c.name === 'ranked')) db.exec('ALTER TABLE lobbies ADD COLUMN ranked INTEGER DEFAULT 0');
+  if (!db.prepare('PRAGMA table_info(lobbies)').all().some(c => c.name === 'map')) db.exec('ALTER TABLE lobbies ADD COLUMN map TEXT');
+  const game = 'Call of Duty', mode = '4v4', map = 'Café';
+  const bots = [
+    ['SimAlpha1', 'sim1@liveroums.gg', 1, 1100], ['SimAlpha2', 'sim2@liveroums.gg', 1, 1050],
+    ['SimAlpha3', 'sim3@liveroums.gg', 1, 980], ['SimAlpha4', 'sim4@liveroums.gg', 1, 1150],
+    ['SimBravo1', 'sim5@liveroums.gg', 2, 1080], ['SimBravo2', 'sim6@liveroums.gg', 2, 1020],
+    ['SimBravo3', 'sim7@liveroums.gg', 2, 1180], ['SimBravo4', 'sim8@liveroums.gg', 2, 950],
+  ];
+  const hash = bcrypt.hashSync('SimBot123!', 12); // même cost que l'inscription (server.js)
+  let code;
+  db.transaction(() => {
+    const ids = [];
+    for (const [pseudo, email, team, sr] of bots) {
+      let u = db.prepare('SELECT id FROM users WHERE email=?').get(email);
+      if (!u) {
+        const r = db.prepare('INSERT INTO users(pseudo,email,password_hash,platform,game_id,is_admin) VALUES(?,?,?,?,?,0)')
+          .run(pseudo, email, hash, 'PC', pseudo.toLowerCase() + '#0001');
+        u = { id: r.lastInsertRowid };
+      } else {
+        db.prepare('UPDATE users SET pseudo=? WHERE id=?').run(pseudo, u.id);
+      }
+      ensure(u.id, game);
+      db.prepare('UPDATE ratings SET sr=? WHERE user_id=? AND game=?').run(sr, u.id, game);
+      for (const row of db.prepare("SELECT l.id FROM lobbies l JOIN lobby_players p ON p.lobby_id=l.id WHERE p.user_id=? AND l.status IN ('attente','en_cours')").all(u.id)) {
+        db.prepare("UPDATE lobbies SET status='termine', ended_at=CURRENT_TIMESTAMP WHERE id=? AND status IN ('attente','en_cours')").run(row.id);
+      }
+      db.prepare('DELETE FROM queue WHERE user_id=?').run(u.id);
+      ids.push({ id: u.id, team, sr });
+    }
+    code = newCode();
+    const host = ids[0].id;
+    const lid = db.prepare("INSERT INTO lobbies(code,game,mode,team_size,is_private,status,host_id,ranked,map) VALUES(?,?,?,?,1,'en_cours',?,0,?)")
+      .run(code, game, mode, 4, host, map).lastInsertRowid;
+    for (const p of ids)
+      db.prepare('INSERT INTO lobby_players(lobby_id,user_id,team,sr_before) VALUES(?,?,?,?)').run(lid, p.id, p.team, p.sr);
+  })();
+  return code;
+}
+
+module.exports = { TIERS, tier, MODES, MAPS, mapSlug, START, getSR, applyResult, tournamentResult, joinQueue, createPrivate, joinByCode, startLobby, declareResult, activeLobby, tryMatch, teamSize, createSim4v4Cafe };
