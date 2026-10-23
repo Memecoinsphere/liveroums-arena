@@ -139,3 +139,7 @@ td.up{color:var(--ok)}td.down{color:var(--err)}
 .anticheat .ac-status{display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;margin:.6rem 0 1rem;padding:.7rem 1rem;border:1px solid rgba(0,240,255,.25);border-radius:12px;background:rgba(10,10,25,.6)}
 .anticheat .ac-status.ac-veille{border-color:rgba(255,200,0,.45)}.anticheat .ac-status.ac-down,.anticheat .ac-status.ac-err,.anticheat .ac-status.ac-config{border-color:rgba(255,61,129,.5)}
 .anticheat .ac-status .btn{margin-left:auto}
+
+.badge.map{color:#ffb347;border-color:#ffb347;background:#ffb34714}
+.map-thumb{margin:12px 0 0;max-width:320px}
+.map-thumb img{display:block;width:100%;height:auto;border-radius:10px;border:1px solid var(--line);object-fit:cover}
